@@ -41,6 +41,7 @@
     else if (m.t === 'error') toast(m.text);
     else if (m.t === 'kicked') { toast('The host removed you from the burrow.'); S = null; showScreen('home'); }
     else if (m.t === 'emote') floatEmote(m.id, m.e);
+    else if (m.t === 'typing') showTyping(m.id);
     else if (m.t === 'gameover') { profile.games = (profile.games || 0) + 1; store.set('hh-profile', profile); sound('win'); }
   }
   function urlJoin() {
@@ -355,6 +356,12 @@
     $('#note-chips').onclick = (e) => { const c = e.target.closest('[data-ins]'); if (c) insert($('#note-input'), c.dataset.ins); };
     $('#chat-form').onsubmit = (e) => { e.preventDefault(); const i = $('#chat-input'); if (i.value.trim()) { send({ t: 'chat', text: i.value, channel: ui.chatCh }); i.value = ''; } };
     $('#chat-channels').onclick = (e) => { const b = e.target.closest('[data-ch]'); if (b) { ui.chatCh = b.dataset.ch; renderChat(); } };
+    $('#quick-asks').onclick = (e) => {
+      const b = e.target.closest('[data-ask]'); if (!b) return;
+      const who = $('#ask-who') ? $('#ask-who').value : '';
+      const q = b.dataset.ask;
+      send({ t: 'chat', text: who ? `${who}, ${q}` : q.charAt(0).toUpperCase() + q.slice(1), channel: ui.chatCh });
+    };
     $('#role-chip').onclick = () => queueModal(() => showRoleReveal(true));
     $('#g-handbook-btn').onclick = () => openHandbook();
     $('#sound-btn').onclick = () => { profile.sound = !profile.sound; saveProfile(); $('#sound-btn').textContent = profile.sound ? '🔔' : '🔕'; };
@@ -500,6 +507,7 @@
         ${meAlive && alive && !self && g.bigGame && g.phase === 'day' ? `<button class="btn small honey" data-pm="nom">${nominated ? 'Withdraw nomination' : '📌 Nominate'}</button>` : ''}
         ${meAlive && alive && !self ? `<button class="btn small" data-pm="yarn">${tied ? '✂️ Untie yarn' : '🧶 Tie yarn (I suspect them)'}</button>` : ''}
         ${meAlive && alive && !self ? '<button class="btn small" data-pm="accuse">🧶 Post "I suspect"</button>' : ''}
+        ${meAlive && alive && !self && P(id).isAI !== undefined && g.phase !== 'night' ? '<button class="btn small leaf" data-pm="ask">💬 Ask them…</button>' : ''}
         <button class="btn small" data-pm="note">📝 Add to notes</button>
         ${!self && !p.isAI ? `<button class="btn small ghost" data-pm="mute">${ui.muted.has(id) ? 'Unmute' : 'Mute'} chat</button>` : ''}
       </div>
@@ -511,6 +519,7 @@
       else if (a === 'nom') send({ t: 'nominate', target: nominated ? null : id });
       else if (a === 'accuse') send({ t: 'claim', kind: 'accuse', target: id });
       else if (a === 'note') { ui.tab = 'notes'; renderTabs(); insert($('#note-input'), p.name); }
+      else if (a === 'ask') { ui.tab = 'chat'; ui.chatCh = 'day'; ui.askWho = p.name; renderTabs(); const i = $('#chat-input'); i.value = `${p.name}, `; i.focus(); }
       else if (a === 'mute') { if (ui.muted.has(id)) ui.muted.delete(id); else ui.muted.add(id); renderChat(); }
       closeModal();
     });
@@ -707,9 +716,19 @@
       || `<div class="empty-hint"><span class="big">💬</span>${ui.chatCh === 'den' ? 'Only the Sneak team can read this.' : ui.chatCh === 'wisp' ? 'Only Wisps can read this.' : 'Say hi! Chat opens during the day.'}</div>`);
     if (atBottom) list.scrollTop = list.scrollHeight;
     const myChanOk = over ? ui.chatCh === 'day' : !meAlive ? ui.chatCh === 'wisp' : ui.chatCh !== 'wisp';
+    const askable = !over && meAlive && ui.chatCh === 'day' && g.phase !== 'night';
+    const qs = [['who do you suspect?', '🤔 Who\'s sus?'], ["what's your role?", '🎭 Your role?'], ['what did you learn last night?', '🔮 Any info?'], ['why?', '❓ Why?']];
+    const denQs = [['who should we get tonight?', '🎯 Who tonight?']];
+    const others = g.alive.filter((id) => id !== S.me);
+    const askKey = [askable, ui.chatCh, others.join(), ui.askWho || ''].join('|');
+    if (ui.askKey !== askKey) {
+      ui.askKey = askKey;
+      $('#quick-asks').innerHTML = askable ? `<select id="ask-who" aria-label="Ask who"><option value="">Everyone</option>${others.map((id) => `<option ${P(id).name === ui.askWho ? 'selected' : ''}>${esc(P(id).name)}</option>`).join('')}</select>${qs.map(([q, l]) => `<button class="chip" data-ask="${esc(q)}">${l}</button>`).join('')}`
+        : ui.chatCh === 'den' && meAlive && !over ? denQs.map(([q, l]) => `<button class="chip" data-ask="${esc(q)}">${l}</button>`).join('') + '<span class="small muted">Name a target and your AI teammates will follow.</span>' : '';
+    }
     const canType = over || !meAlive || ui.chatCh === 'den' || g.phase !== 'night';
     $('#chat-input').disabled = !(canType && myChanOk);
-    $('#chat-input').placeholder = !myChanOk ? (meAlive ? 'Switch channels to talk.' : 'Wisps talk in the Wisps channel.') : !canType ? 'The village is asleep 💤' : 'Say something…';
+    $('#chat-input').placeholder = !myChanOk ? (meAlive ? 'Switch channels to talk.' : 'Wisps talk in the Wisps channel.') : !canType ? 'The village is asleep 💤' : 'Talk to anyone, e.g. "Mochi, who do you suspect?"';
     const total = g.chat.day.length + g.chat.den.length + g.chat.wisp.length;
     if (ui.tab === 'chat') ui.seenChat = total;
     $('#chat-dot').classList.toggle('hidden', ui.tab === 'chat' || total <= ui.seenChat);
@@ -739,6 +758,18 @@
     }
     const all = chans.flatMap((c) => g.chat[c] || []);
     if (all.length) ui.bubbleTs = Math.max(ui.bubbleTs || 0, ...all.map((m) => m.ts));
+  }
+  function showTyping(id) {
+    const xy = houseXY(id), layer = $('#floaters');
+    if (xy && layer) {
+      const el = document.createElement('div');
+      el.className = 'speech typing'; el.innerHTML = '<i></i><i></i><i></i>';
+      el.style.left = xy[0]; el.style.top = xy[1];
+      layer.appendChild(el); setTimeout(() => el.remove(), 1500);
+    }
+    const line = $('#typing-line'); if (!line) return;
+    line.textContent = `${P(id)?.name || 'Someone'} is typing…`;
+    clearTimeout(ui.typingT); ui.typingT = setTimeout(() => { line.textContent = ''; }, 1600);
   }
   function floatEmote(id, e) {
     const xy = houseXY(id), layer = $('#floaters'); if (!xy || !layer) return;

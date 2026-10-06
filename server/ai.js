@@ -305,4 +305,4 @@ function vote(room, p) {
   if (Math.random() < 0.35) say(room, p, t && t !== 'skip' ? 'vote' : 'skip', { t: t && t !== 'skip' ? room.name(t) : '' });
 }
 
-module.exports = { night, notes, dayTalk, dayLate, ready, vote };
+module.exports = { night, notes, dayTalk, dayLate, ready, vote, suspicion, mem };

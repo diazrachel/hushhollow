@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { ROLES, isSneakTeam, generateSetup, shuffle, pick } = require('./roles');
 const { clean, cleanName } = require('./filter');
 const AI = require('./ai');
+const Talk = require('./talk');
 
 const HATS = ['none', 'bow', 'flower', 'crown', 'cap', 'tophat', 'mushroom', 'sprout'];
 const CRITTERS = ['mouse', 'hamster', 'frog', 'duck', 'bunny', 'cat', 'fox', 'raccoon', 'bear', 'panda', 'pig', 'koala'];
@@ -174,7 +175,7 @@ class Room {
     if (!p.isAI && Date.now() - p.lastChat < 600) return;
     p.lastChat = Date.now();
     const g = this.game;
-    const msg = { by: p.id, text, ts: Date.now() };
+    const msg = { by: p.id, text, ts: Date.now(), depth: p.isAI ? Math.max(1, Number(m.depth) || 1) : 0 };
     if (!g || g.phase === 'over') {
       this.lobbyChat.push(msg); this.lobbyChat = this.lobbyChat.slice(-80);
       return this.changed();
@@ -187,6 +188,7 @@ class Room {
     else ch = 'day';
     g.chat[ch].push(msg); g.chat[ch] = g.chat[ch].slice(-100);
     this.changed();
+    try { Talk.onChat(this, msg, ch); } catch (e) { console.error('[talk]', e); }
   }
 
   // ---------- game setup ----------
