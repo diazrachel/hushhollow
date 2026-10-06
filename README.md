@@ -6,6 +6,7 @@ A free, cozy social deduction game you play in the browser. A few critters in th
 - Quick Play with strangers (by language), or private burrows with a 4-letter code and share link
 - Add AI critters (Sleepy, Clever, Cunning) to fill any lobby
 - Hints, not answers: every info role gets fuzzy information you have to reason about
+- Role reveal cards, phase banners, a morning report, animated vote results, and AI critters that chat
 - Private Notepad that becomes public when you're eliminated (roles are never revealed until the end)
 - Claim Board with structured cards, so players can coordinate without a shared language
 - First Night tutorial, Practice Burrow, and the Hollow Handbook
@@ -55,7 +56,7 @@ The server owns every secret. Clients send intents ("I visit house 4") and only 
 | Role | Team | Ability |
 |---|---|---|
 | Villager | Village | Peek at a house: learn how many others visited it |
-| Owl | Village | Watch a critter: learn if at least one of them + 2 random others is a Sneak (never which one) |
+| Owl | Village | Watch a critter: get one true fuzzy hint about them + 2 random others ("at least one is a Sneak" or "at least one is NOT a Sneak") |
 | Hedgehog | Village | Protect a critter from the Sneaks (not the same one twice in a row) |
 | Gossip Bunny | Village | Watch a house: learn who visited, but not why |
 | Elder Turtle | Village | Reveal once during the day for a double vote |
