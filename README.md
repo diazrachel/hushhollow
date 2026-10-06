@@ -33,6 +33,17 @@ GitHub Pages only hosts static files, and this game needs a small Node server fo
 
 Any host works as long as it supports WebSockets and runs `npm start`.
 
+## Talking AI critters
+
+AI critters reply in chat when you name them ("Mochi, what's your role?") or ask the group ("who's sus?"). They answer from their real role and what they actually know. Sneaks lie and keep a cover story, and AI Sneak teammates follow your call in the Den.
+
+This works out of the box for free. For smarter replies in any language, with a personality per critter, add an Anthropic API key:
+
+1. Get a key at https://platform.claude.com (pay as you go; replies use Claude Haiku and cost a fraction of a cent each).
+2. In Render, open your service → **Environment** → add `ANTHROPIC_API_KEY` with your key → Save. Render redeploys automatically.
+
+Optional spending caps (environment variables): `AI_MAX_REPLIES_PER_GAME` (default 80) and `AI_MAX_REPLIES_PER_MINUTE` (default 30, across the whole server). When a cap is reached, critters quietly switch back to the free brain.
+
 ## How it's built
 
 ```
@@ -41,6 +52,7 @@ server/
   room.js    The game engine: phases, night actions, hints, votes, notepads, what each player may see
   roles.js   Roles, point values, and the auto-balancer for 4–14 players
   ai.js      Rule-based AI critters (they use the same actions as humans, no peeking)
+  talk.js    AI chat replies: free rule-based brain + optional Claude brain
   filter.js  Chat and nickname filter
 public/
   index.html, style.css
