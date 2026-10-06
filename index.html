@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hush Hollow</title>
+  <meta name="description" content="A free, cozy social deduction game. Find the Sneaks hiding in the village. No account needed.">
+  <meta name="theme-color" content="#DCEBC7">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="phase-home">
+  <div id="sky" aria-hidden="true"><div class="stars"></div></div>
+
+  <!-- ============ HOME ============ -->
+  <main id="home" class="screen">
+    <header class="hero">
+      <div class="hero-village" aria-hidden="true">
+        <span class="hv-house" style="--i:0">🏡</span><span class="hv-house" style="--i:1">🏠</span>
+        <span class="hv-pond">〰️</span>
+        <span class="hv-house" style="--i:2">🏡</span><span class="hv-house" style="--i:3">🏠</span>
+      </div>
+      <h1 class="title">Hush Hollow</h1>
+      <p class="tagline">A few critters in the village are secretly Sneaks. Find them before they take over.</p>
+    </header>
+
+    <section class="card profile-card" aria-labelledby="you-h">
+      <h2 id="you-h">Your critter</h2>
+      <div class="profile-row">
+        <div id="profile-preview" class="avatar big"></div>
+        <label class="field grow">
+          <span>Nickname</span>
+          <input id="name-input" maxlength="16" autocomplete="off" placeholder="Pick a nickname">
+        </label>
+      </div>
+      <div class="picker" id="critter-picker" role="radiogroup" aria-label="Critter"></div>
+      <div class="picker colors" id="color-picker" role="radiogroup" aria-label="Color"></div>
+      <div class="picker hats" id="hat-picker" role="radiogroup" aria-label="Hat"></div>
+    </section>
+
+    <section class="play-grid">
+      <div class="card play-card">
+        <h2>Quick Play</h2>
+        <p>Join a public game with players from around the world.</p>
+        <div class="row">
+          <select id="lang-select" aria-label="Lobby language">
+            <option value="en">English</option><option value="es">Español</option><option value="pt">Português</option>
+            <option value="fr">Français</option><option value="de">Deutsch</option><option value="tr">Türkçe</option>
+            <option value="id">Bahasa Indonesia</option><option value="tl">Tagalog</option><option value="ja">日本語</option>
+            <option value="ko">한국어</option><option value="zh">中文</option><option value="ru">Русский</option>
+          </select>
+          <button class="btn primary" id="quick-btn">Quick Play</button>
+        </div>
+        <label class="check"><input type="checkbox" id="sprout-check"> Beginner lobbies (Cozy roles only)</label>
+      </div>
+      <div class="card play-card">
+        <h2>Play with friends</h2>
+        <p>Make a private burrow and share the link.</p>
+        <button class="btn primary" id="create-btn">Make a Burrow</button>
+        <div class="row join-row">
+          <input id="code-input" maxlength="4" placeholder="Code" aria-label="Burrow code" autocomplete="off">
+          <button class="btn" id="join-btn">Join</button>
+        </div>
+      </div>
+      <div class="card play-card learn">
+        <h2>New here?</h2>
+        <p>Learn the game in about 4 minutes.</p>
+        <button class="btn honey" id="tutorial-btn">Play the First Night tutorial</button>
+        <div class="row">
+          <button class="btn" id="practice-btn">Practice Burrow</button>
+          <button class="btn" id="handbook-btn">Hollow Handbook</button>
+        </div>
+      </div>
+    </section>
+    <footer class="home-foot">
+      <button class="link" id="settings-btn">Settings and carry code</button>
+      <span>Free forever. No account, no ads.</span>
+    </footer>
+  </main>
+
+  <!-- ============ LOBBY ============ -->
+  <main id="lobby" class="screen hidden"></main>
+
+  <!-- ============ GAME ============ -->
+  <main id="game" class="screen hidden">
+    <div class="topbar">
+      <div class="phase-pill"><span id="phase-name">Night 1</span><span id="timer" class="timer">0:30</span></div>
+      <button id="role-chip" class="role-chip"></button>
+      <div class="top-actions">
+        <button class="icon-btn" id="sound-btn" title="Sound" aria-label="Toggle sound">🔔</button>
+        <button class="icon-btn" id="g-handbook-btn" title="Handbook" aria-label="Open handbook">📖</button>
+        <button class="icon-btn" id="leave-btn" title="Leave game" aria-label="Leave game">🚪</button>
+      </div>
+    </div>
+    <div class="game-grid">
+      <section class="col-left">
+        <div class="card action-card" id="action-card"></div>
+        <div class="card notepad-card">
+          <div class="card-head"><h3>Notepad</h3><span id="note-count" class="muted small"></span></div>
+          <p class="muted small">Private while you're alive. Everyone reads it if you're eliminated.</p>
+          <ol id="note-list" class="note-list"></ol>
+          <div id="note-chips" class="chips"></div>
+          <form id="note-form" class="row">
+            <input id="note-input" maxlength="200" placeholder="Write a note…" autocomplete="off">
+            <button class="btn small">Add</button>
+          </form>
+        </div>
+      </section>
+      <section class="col-map">
+        <div id="map" class="map" aria-label="Village map"></div>
+        <div class="emote-bar" id="emote-bar"></div>
+      </section>
+      <section class="col-right card">
+        <nav class="tabs" role="tablist" id="tabs">
+          <button role="tab" data-tab="board" class="active">Board</button>
+          <button role="tab" data-tab="chat">Chat<span class="dot hidden" id="chat-dot"></span></button>
+          <button role="tab" data-tab="behind">Left Behind</button>
+          <button role="tab" data-tab="log">Log</button>
+        </nav>
+        <div class="tab-body" id="tab-board"></div>
+        <div class="tab-body hidden" id="tab-chat">
+          <div class="chat-channels" id="chat-channels"></div>
+          <div class="chat-list" id="chat-list"></div>
+          <form id="chat-form" class="row">
+            <input id="chat-input" maxlength="240" placeholder="Say something…" autocomplete="off">
+            <button class="btn small">Send</button>
+          </form>
+        </div>
+        <div class="tab-body hidden" id="tab-behind"></div>
+        <div class="tab-body hidden" id="tab-log"></div>
+      </section>
+    </div>
+  </main>
+
+  <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="conn" class="conn hidden">Reconnecting…</div>
+
+  <script src="data.js"></script>
+  <script src="tutorial.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
