@@ -6,6 +6,30 @@
 
 const { isSneakTeam, ROLES, pick } = require('./roles');
 
+// ---------------- chat ----------------
+const LINES = {
+  mourn: ['Poor {v} 😢', 'Not {v}!! They were so nice…', 'RIP {v}. We HAVE to find who did this.', 'Noooo {v} 😭', '{v} is gone… okay, think everyone.'],
+  safe: ['Phew, everyone made it!', 'Nobody vanished? Someone got protected 🦔', 'A quiet night… suspicious.'],
+  accuse: ["I really think it's {t}.", '{t} has been acting weird 🤔', 'My gut says {t}.', 'Anyone else side-eyeing {t}? 👀', "{t}, explain yourself."],
+  defend: ["It's not me, I promise!", "Why me?? I'm on your side 😤", "Look somewhere else, I'm innocent!", "You're wasting a vote on me.", 'I swear I was home all night 🏡'],
+  owl: ['Owl here 🦉 my hints are on the Board.', "I'm the Owl. Read my hint cards!", 'Owl hints posted. Somebody in there is a Sneak.'],
+  saw: ["I saw {t} at {v}'s house last night 👀", "{t} visited {v} the night they vanished. Just saying."],
+  vote: ['Voting {t}.', 'Going with {t}.', 'My vote is on {t}.', '{t}. Sorry not sorry.'],
+  skip: ["I'm not sure yet, skipping.", 'Skipping, not enough info.'],
+  den: ["Let's get {t} tonight.", '{t} is getting too close. Them?', 'I say {t} 🌑', '{t} talks too much. Bye bye.'],
+  hello: ['hi everyone!', 'good luck all 🍀', 'hiii', "let's find these Sneaks"],
+};
+function say(room, p, key, vars = {}, channel) {
+  const g = room.game, M = mem(g, p.id);
+  M.spoke = M.spoke || {};
+  const slot = `${g.day}-${g.phase}`;
+  if ((M.spoke[slot] || 0) >= 2) return;
+  M.spoke[slot] = (M.spoke[slot] || 0) + 1;
+  const text = pick(LINES[key]).replace(/\{(\w)\}/g, (_, k) => vars[k] || '');
+  room.act(p.id, { t: 'chat', text, channel });
+}
+const shared = (g) => (g.ai._shared = g.ai._shared || { mourned: new Set(), greeted: false });
+
 function mem(g, id) {
   if (!g.ai[id]) g.ai[id] = { claimedRole: false, posted: new Set(), notedIdx: 0, fakeNights: new Set() };
   return g.ai[id];
@@ -39,10 +63,9 @@ function suspicion(room, p) {
 
   // My own hints
   const { hints, saw } = intel(g, me);
-  const cleared = new Set();
-  for (const h of hints) if (!h.yes) h.group.forEach((x) => cleared.add(x));
+  const cleared = new Set([...g.turtles]);
   for (const h of hints) {
-    if (!h.yes) h.group.forEach((x) => add(x, -6));
+    if (!h.yes) h.group.forEach((x) => add(x, -0.8)); // "at least one is NOT a Sneak" is weak evidence
     else {
       const left = h.group.filter((x) => !cleared.has(x) && g.alive.has(x));
       left.forEach((x) => add(x, left.length === 1 ? 40 : 6 / left.length + 1));
@@ -60,9 +83,8 @@ function suspicion(room, p) {
     if (c.kind === 'role') (roleClaims[c.role] = roleClaims[c.role] || new Set()).add(c.by);
     const w = cleared.has(c.by) ? 1.5 : 1;
     if (c.kind === 'hint') {
-      if (c.result === 'clear') c.targets.forEach((x) => add(x, -2 * w));
+      if (c.result === 'not') c.targets.forEach((x) => add(x, -0.6 * w));
       else c.targets.forEach((x) => add(x, (c.targets.length === 1 ? 4 : 1.5) * w));
-      if (!sneak && c.result === 'clear' && c.targets.some((x) => isSneakTeam(g.roles[x]) && x === me)) add(c.by, 0);
     }
     if (c.kind === 'saw') add(c.target, (diedAtNight(g, c.at, c.day) ? 4 : 0.5) * w);
     if (c.kind === 'accuse') add(c.target, 0.8 * w);
@@ -79,7 +101,7 @@ function suspicion(room, p) {
     for (const n of g.notes[d.id] || []) {
       for (const id of others) {
         if (!n.text.includes(room.name(id))) continue;
-        if (/none of/i.test(n.text)) add(id, -1.5); else if (/at least one/i.test(n.text)) add(id, 1); else if (/visited/i.test(n.text)) add(id, 0.5);
+        if (/not a sneak/i.test(n.text)) add(id, -0.5); else if (/is a sneak/i.test(n.text)) add(id, 1.2); else if (/visited/i.test(n.text)) add(id, 0.5);
       }
     }
   }
@@ -121,6 +143,10 @@ function night(room, p) {
         }
       }
       send(t);
+      const team = [...g.alive].filter((id) => isSneakTeam(g.roles[id]));
+      if (t && team.length > 1 && level !== 'sleepy' && Math.random() < 0.6) setTimeout(() => {
+        if (room.game === g && g.phase === 'night' && g.alive.has(me)) say(room, p, 'den', { t: room.name(t) }, 'den');
+      }, 400 + Math.random() * 1500);
     }
     if (role === 'trickster' && level !== 'sleepy') {
       const pool = others.filter((id) => id !== g.lastMeddle[me] && !isSneakTeam(g.roles[id]));
@@ -177,16 +203,26 @@ function dayTalk(room, p) {
   const s = suspicion(room, p), sneak = isSneakTeam(role);
   const accusers = accusedBy(g, me).filter((id) => g.alive.has(id));
   const { hints, saw } = intel(g, me);
+  const sh = shared(g);
+  const lastDawn = [...g.events].reverse().find((e) => e.type === 'dawn');
+  if (lastDawn && !sh.mourned.has(lastDawn.id) && Math.random() < 0.7) {
+    sh.mourned.add(lastDawn.id);
+    if (lastDawn.died.length) say(room, p, 'mourn', { v: room.name(lastDawn.died[0]) }); else if (lastDawn.night > 1) say(room, p, 'safe');
+    else if (!sh.greeted) { sh.greeted = true; say(room, p, 'hello'); }
+  }
+  if (accusers.length && Math.random() < 0.8) say(room, p, 'defend');
   const claimRole = (r) => { if (!M.claimedRole) { claim(room, me, { kind: 'role', role: r }); M.claimedRole = true; } };
 
   if (!sneak) {
     if (role === 'owl' && hints.length && (g.day >= 2 || accusers.length >= 2 || hints.some((h) => !h.yes))) {
+      if (!M.claimedRole) say(room, p, 'owl');
       claimRole('owl');
-      hints.forEach((h, i) => { if (!M.posted.has(`h${i}`)) { M.posted.add(`h${i}`); claim(room, me, { kind: 'hint', targets: h.group, result: h.yes ? 'sneak' : 'clear' }); } });
+      hints.forEach((h, i) => { if (!M.posted.has(`h${i}`)) { M.posted.add(`h${i}`); claim(room, me, { kind: 'hint', targets: h.group, result: h.yes ? 'sneak' : 'not' }); } });
     } else if (role === 'bunny') {
       saw.forEach((v, i) => {
         if (M.posted.has(`s${i}`) || !diedAtNight(g, v.house, v.night)) return;
         M.posted.add(`s${i}`); claimRole('bunny');
+        if (v.visitors.length) say(room, p, 'saw', { t: room.name(v.visitors[0]), v: room.name(v.house) });
         v.visitors.forEach((x) => claim(room, me, { kind: 'saw', target: x, at: v.house }));
       });
     } else if (role === 'turtle' && !g.turtles.has(me) && g.day >= 2 && Math.random() < 0.5) {
@@ -221,7 +257,7 @@ function dayTalk(room, p) {
       if (lastDeath && !M.posted.has(`fs${g.day}`) && Math.random() < 0.3) {
         M.posted.add(`fs${g.day}`);
         const scapegoat = top(s);
-        if (scapegoat) { claimRole('bunny'); claim(room, me, { kind: 'saw', target: scapegoat, at: lastDeath.id }); }
+        if (scapegoat) { claimRole('bunny'); claim(room, me, { kind: 'saw', target: scapegoat, at: lastDeath.id }); say(room, p, 'saw', { t: room.name(scapegoat), v: room.name(lastDeath.id) }); }
       }
     }
   }
@@ -229,6 +265,7 @@ function dayTalk(room, p) {
   if (t && s[t] >= (sneak ? 0.8 : 3) && !M.posted.has(`day${g.day}`) && (!sneak || Math.random() < 0.5)) {
     M.posted.add(`day${g.day}`);
     claim(room, me, { kind: 'accuse', target: t });
+    if (Math.random() < 0.7) say(room, p, 'accuse', { t: room.name(t) });
   }
   if (t) room.act(me, { t: 'yarn', target: t });
   for (const c of g.claims.slice(-8)) {
@@ -265,6 +302,7 @@ function vote(room, p) {
   if (sneak) { const l = lead((id) => !isSneakTeam(g.roles[id])); if (l && Math.random() < 0.6) t = l; }
   else if (t && s[t] < 1.5) t = lead() || t;
   room.act(me, { t: 'vote', target: t || 'skip' });
+  if (Math.random() < 0.35) say(room, p, t && t !== 'skip' ? 'vote' : 'skip', { t: t && t !== 'skip' ? room.name(t) : '' });
 }
 
 module.exports = { night, notes, dayTalk, dayLate, ready, vote };

@@ -24,7 +24,7 @@
   // ---------- connection ----------
   let ws = null, S = null, offset = 0, retry = 0;
   const ui = {
-    tab: 'board', chatCh: 'day', composer: 'role', muted: new Set(), phaseKey: '', phaseStart: 0,
+    tab: 'board', chatCh: 'day', composer: 'hint', muted: new Set(), phaseKey: '', phaseStart: 0,
     hints: {}, overShown: null, seenChat: 0, lastDeaths: 0, built: { lobby: false },
   };
   function connect() {
@@ -96,14 +96,23 @@
       }
     } catch { /* no audio */ }
   }
-  function modal(html, cls = '') {
+  const modalQueue = [];
+  function modal(html, cls = '', kind = '') {
     const ov = $('#overlay');
     ov.innerHTML = `<div class="modal ${cls}"><button class="icon-btn close" data-close aria-label="Close">✕</button>${html}</div>`;
+    ov.dataset.kind = kind;
     ov.classList.remove('hidden');
     const first = ov.querySelector('button:not([data-close]), input, select'); if (first) first.focus();
     return ov.firstElementChild;
   }
-  function closeModal() { $('#overlay').classList.add('hidden'); $('#overlay').innerHTML = ''; }
+  function closeModal() {
+    const ov = $('#overlay');
+    ov.classList.add('hidden'); ov.innerHTML = ''; ov.dataset.kind = '';
+    const next = modalQueue.shift();
+    if (next) setTimeout(next, 180);
+  }
+  function queueModal(fn) { if ($('#overlay').classList.contains('hidden')) fn(); else modalQueue.push(fn); }
+  function closeAllModals() { modalQueue.length = 0; const ov = $('#overlay'); ov.classList.add('hidden'); ov.innerHTML = ''; ov.dataset.kind = ''; }
   $('#overlay').addEventListener('click', (e) => { if (e.target.id === 'overlay' || e.target.closest('[data-close]')) closeModal(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#overlay').classList.contains('hidden')) closeModal(); });
 
@@ -132,6 +141,8 @@
     $('#practice-btn').onclick = openPractice;
     $('#handbook-btn').onclick = () => openHandbook();
     $('#settings-btn').onclick = openSettings;
+    const heroCast = [['bunny', 'berry', 'flower'], ['fox', 'honey', 'none'], ['frog', 'mint', 'mushroom'], ['bear', 'sky', 'cap']];
+    $('#hero-village').innerHTML = heroCast.map(([critter, color, hat], i) => `${i === 2 ? '<div class="pond-mini"></div>' : ''}<div class="hv" style="--i:${i}">${cottage({ color })}${avatar({ critter, color, hat })}</div>`).join('');
     updatePreview();
   }
   function renderHats() {
@@ -196,7 +207,7 @@
     } else if (tab === 'hints') {
       body = `<div class="hb-grid">${HANDBOOK.hints.map(([t, d]) => `<div class="hb-card"><h3>${t}</h3><p>${d}</p></div>`).join('')}</div>
       <h3 style="margin-top:1rem">Worked example</h3>
-      <p>Night 1, the Owl learns: <b>at least one of Pip, Bramble, and Fig is a Sneak.</b> Night 2: <b>none of Pip, Mochi, and Juniper is a Sneak.</b> Pip is cleared, so the Sneak from night 1 is Bramble or Fig. Then a Gossip Bunny posts that Bramble visited the house of the critter who vanished. Now Bramble looks bad… unless the Trickster meddled with the Bunny. Line up every card before you vote.</p>`;
+      <p>Night 1, the Owl learns: <b>at least one of Pip, Bramble, and Fig is a Sneak.</b> Night 2: <b>at least one of Bramble, Mochi, and Juniper is a Sneak.</b> Bramble is in both groups, so Bramble looks bad. Then a Gossip Bunny posts that Bramble visited the house of the critter who vanished. Now Bramble looks bad… unless the Trickster meddled with the Bunny. Line up every card before you vote.</p>`;
     } else body = `<ul>${HANDBOOK.etiquette.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`;
     const m = modal(`<h2>Hollow Handbook</h2>
       <nav class="tabs">${tabs.map(([k, l]) => `<button data-hb="${k}" class="${k === tab ? 'active' : ''}">${l}</button>`).join('')}</nav>${body}`, 'wide');
@@ -205,38 +216,12 @@
 
   function openTutorial() {
     window.HHTutorial.open({
-      profile, modal, closeModal, avatar,
+      profile, modal, closeModal, avatar, cottage,
       onDone() {
         if (!profile.tutorialDone) { profile.tutorialDone = true; profile.hat = 'sprout'; saveProfile(); renderHats(); updatePreview(); toast('You unlocked the Sprout Leaf hat 🌱'); }
       },
       onPractice() { closeModal(); send({ t: 'create', practice: true, forcedRole: 'owl' }); },
     });
-  }
-
-  // ================= STATE → RENDER =================
-  function onState(prev) {
-    if (!S.game) { renderLobby(); return; }
-    const g = S.game;
-    const key = `${g.phase}-${g.day}-${g.defenseIdx}`;
-    if (key !== ui.phaseKey) {
-      ui.phaseKey = key; ui.phaseStart = Date.now();
-      if (g.phase === 'night') sound('night'); else if (g.phase === 'dawn') sound('chime'); else if (g.phase === 'vote') sound('pop');
-      const alive = g.alive.includes(S.me);
-      if (alive && !S.game.chat.den.length && ui.chatCh === 'den' && g.phase !== 'night') ui.chatCh = 'day';
-      if (!alive && ui.chatCh !== 'wisp') ui.chatCh = 'wisp';
-      if (g.phase === 'day') hint(`day${g.day}`, 'post a claim card on the Board. Cards read the same in every language.');
-      if (g.phase === 'vote') hint('vote', "tap a highlighted house to vote, or press Skip if you're unsure.");
-      if (g.phase === 'dawn' && g.deaths.length) hint('behind', 'open Left Behind to read the notepad of whoever vanished.');
-    }
-    renderGame();
-    if (g.deaths.length > ui.lastDeaths && prev && prev.game) {
-      const d = g.deaths[g.deaths.length - 1];
-      const el = $(`.house[data-id="${d.id}"]`);
-      if (el && d.how === 'pond') { el.classList.add('splash'); sound('splash'); }
-    }
-    ui.lastDeaths = g.deaths.length;
-    if (g.phase === 'over' && ui.overShown !== `${S.code}-${g.day}`) { ui.overShown = `${S.code}-${g.day}`; setTimeout(showGameOver, 600); }
-    if (g.phase !== 'over' && ui.overShown && $('#overlay .gameover')) closeModal();
   }
 
   // ================= LOBBY =================
@@ -271,8 +256,7 @@
   function renderLobby() {
     showScreen('lobby'); setPhaseClass('lobby');
     if (!ui.built.lobby) buildLobby();
-    ui.overShown = null; ui.lastDeaths = 0; ui.hints = {};
-    if ($('#overlay .gameover')) closeModal();
+    if ($('#overlay .gameover')) closeAllModals();
     const host = S.hostId === S.me, n = S.players.length;
     const title = S.practice ? 'Practice Burrow' : S.isPublic ? (S.sprout ? 'Beginner lobby' : 'Public lobby') : 'Your burrow';
     const sub = S.practice ? 'Just you and the AI critters. Take your time.'
@@ -311,8 +295,50 @@
     const list = $('#lb-chat');
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     list.innerHTML = S.lobbyChat.map((m) => m.sys ? `<div class="msg sys">${esc(m.text)}</div>`
-      : ui.muted.has(m.by) ? '' : `<div class="msg">${avatar(P(m.by), 'xs')}<div><b>${nm(m.by)}</b> ${esc(m.text)}</div></div>`).join('');
+      : ui.muted.has(m.by) ? '' : `<div class="msg ${m.by === S.me ? 'mine' : ''}">${avatar(P(m.by), 'xs')}<div class="bubble-txt"><b>${nm(m.by)}</b>${esc(m.text)}</div></div>`).join('');
     if (atBottom) list.scrollTop = list.scrollHeight;
+  }
+
+  // ================= STATE → RENDER =================
+  const GOALS = {
+    village: 'Find the Sneaks and vote them into the Pond.',
+    sneaks: "Spirit critters away until the Sneaks equal everyone else. Don't get caught!",
+    frog: 'Get yourself voted into the Pond. That is your win!',
+    moth: 'Stay alive until the very end, whoever wins.',
+  };
+  const teamClass = (team) => (team === 'sneaks' ? 'sneaks' : team === 'village' ? 'village' : 'solo');
+
+  function onState(prev) {
+    if (!S.game) { ui.gameId = null; renderLobby(); return; }
+    const g = S.game;
+    const gameId = S.code + g.houses.join('');
+    if (ui.gameId !== gameId) {
+      ui.gameId = gameId; ui.overShown = false; ui.phaseKey = ''; ui.hints = {}; ui.lastDeaths = g.deaths.length;
+      ui.seenEvent = g.events.length ? Math.max(...g.events.map((e) => e.id)) : 0;
+      ui.bubbleTs = S.now; ui.seenChat = 0; ui.tab = 'board';
+      closeAllModals();
+      if (g.phase !== 'over') queueModal(showRoleReveal);
+    }
+    const key = `${g.phase}-${g.day}-${g.defenseIdx}`;
+    if (key !== ui.phaseKey) {
+      const first = !ui.phaseKey;
+      ui.phaseKey = key; ui.phaseStart = Date.now(); ui.phaseTotal = Math.max(1, g.endsAt - now());
+      if (!first) phaseBanner(g);
+      if (g.phase === 'night') sound('night'); else if (g.phase === 'dawn') sound('chime'); else if (g.phase === 'vote') sound('pop');
+      const alive = g.alive.includes(S.me);
+      if (!alive && ui.chatCh !== 'wisp') ui.chatCh = 'wisp';
+      if (g.phase === 'day') hint(`day${g.day}`, 'share what you learned with a card on the Board, then press Ready.');
+      if (g.phase === 'vote') hint('vote', "tap a house to vote, or Skip if you're unsure.");
+    }
+    renderGame();
+    for (const e of g.events) {
+      if (e.id <= ui.seenEvent) continue;
+      ui.seenEvent = e.id;
+      if (e.type === 'dawn') queueModal(() => showDawn(e));
+      if (e.type === 'pond') { if (e.out) splashPond(e.out); queueModal(() => showPond(e)); }
+    }
+    showSpeech(g);
+    if (g.phase === 'over' && !ui.overShown) { ui.overShown = true; queueModal(showGameOver); }
   }
 
   // ================= GAME =================
@@ -320,14 +346,16 @@
   function buildGame() {
     $('#emote-bar').innerHTML = EMOTES.map((e) => `<button data-emote="${e}" aria-label="Send ${e}">${e}</button>`).join('');
     $('#emote-bar').onclick = (e) => { const b = e.target.closest('[data-emote]'); if (b) send({ t: 'emote', e: b.dataset.emote }); };
-    $('#map').innerHTML = `<svg class="yarn" viewBox="0 0 100 100" preserveAspectRatio="none" id="yarn"></svg><div class="pond" id="pond"><div class="pond-text" id="pond-text"></div></div><div id="houses"></div><div id="floaters"></div>`;
+    $('#map').innerHTML = `<div class="path-ring"></div><svg class="yarn" viewBox="0 0 100 100" preserveAspectRatio="none" id="yarn"></svg>
+      <div class="pond" id="pond"><span class="lily" style="left:14%;top:30%">🪷</span><span class="lily" style="right:16%;bottom:22%">🍃</span><span class="pond-icon" id="pond-icon">🌙</span></div>
+      <div id="houses"></div><div id="floaters"></div>`;
     $('#map').onclick = (e) => { const h = e.target.closest('.house'); if (h) onHouse(h.dataset.id); };
     $('#tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) { ui.tab = b.dataset.tab; renderTabs(); } };
     $('#note-form').onsubmit = (e) => { e.preventDefault(); const i = $('#note-input'); if (i.value.trim()) { send({ t: 'note', text: i.value }); i.value = ''; } };
     $('#note-chips').onclick = (e) => { const c = e.target.closest('[data-ins]'); if (c) insert($('#note-input'), c.dataset.ins); };
     $('#chat-form').onsubmit = (e) => { e.preventDefault(); const i = $('#chat-input'); if (i.value.trim()) { send({ t: 'chat', text: i.value, channel: ui.chatCh }); i.value = ''; } };
     $('#chat-channels').onclick = (e) => { const b = e.target.closest('[data-ch]'); if (b) { ui.chatCh = b.dataset.ch; renderChat(); } };
-    $('#role-chip').onclick = openRoleCard;
+    $('#role-chip').onclick = () => queueModal(() => showRoleReveal(true));
     $('#g-handbook-btn').onclick = () => openHandbook();
     $('#sound-btn').onclick = () => { profile.sound = !profile.sound; saveProfile(); $('#sound-btn').textContent = profile.sound ? '🔔' : '🔕'; };
     $('#sound-btn').textContent = profile.sound ? '🔔' : '🔕';
@@ -337,94 +365,118 @@
     };
     $('#action-card').addEventListener('click', onActionClick);
     $('#action-card').addEventListener('change', (e) => { if (e.target.id === 'meddle-sel') send({ t: 'night', kind: 'meddle', target: e.target.value || null }); });
-    $('#tab-board').innerHTML = `<div class="composer" id="composer"></div><div id="claim-list" style="display:flex;flex-direction:column;gap:.4rem"></div>`;
+    $('#secrets').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-jot]'); if (!b) return;
+      send({ t: 'note', text: b.dataset.jot }); toast('Saved to your Notepad 📝');
+    });
+    $('#tab-board').innerHTML = `<div class="composer" id="composer"></div><div id="claim-list" style="display:flex;flex-direction:column;gap:.5rem"></div>`;
     $('#tab-board').addEventListener('click', onBoardClick);
     gameBuilt = true;
   }
   function setHTML(el, html) { if (el.__html !== html) { el.innerHTML = html; el.__html = html; } }
   function insert(input, text) { input.value = (input.value ? `${input.value.trim()} ` : '') + text; input.focus(); }
+  function cottage(p) {
+    const roof = (COLORS[p.color] || COLORS.honey).hex;
+    return `<svg class="cottage" viewBox="0 0 64 56" aria-hidden="true">
+      <rect class="chim" x="43" y="7" width="7" height="13" rx="1.5"/>
+      <path class="roof" d="M4 29 L32 5 L60 29 Z" fill="${roof}"/>
+      <rect class="wall" x="10" y="27" width="44" height="26" rx="3"/>
+      <rect class="win" x="15" y="33" width="12" height="10" rx="2"/><path class="pane" d="M15 38 H27 M21 33 V43"/>
+      <rect class="door" x="35" y="35" width="12" height="18" rx="6"/></svg>`;
+  }
+
+  function phaseInfo(g) {
+    const r = ROLES[g.myRole], meAlive = g.alive.includes(S.me), onTeam = r.team === 'sneaks';
+    const picked = g.mySneakVote || (g.myAction && g.myAction.target);
+    const map = {
+      night: ['🌙', g.settling ? 'Quiet night' : `Night ${g.day}`,
+        !meAlive ? "You're a Wisp: read every chat, even the Den" : picked ? '✓ Done! Waiting for morning…'
+          : onTeam && !g.settling ? 'Pick who to spirit away' : `${g.settling && onTeam ? 'Peek at a house' : r.verb}: tap a glowing house`],
+      dawn: ['🌅', 'Morning', 'Read the morning report'],
+      day: ['☀️', `Day ${g.day}`, !meAlive ? 'Wisps watch from the mist' : g.bigGame ? 'Nominate a suspect, then press Ready' : 'Share hints on the Board, then press Ready'],
+      defense: ['🎤', 'Defense', `Listen to ${P(g.nominees[g.defenseIdx])?.name || 'the nominee'}`],
+      vote: ['🗳️', 'Vote!', !meAlive ? 'The living are voting' : g.votes[S.me] ? '✓ Voted! Waiting for others…' : 'Tap a house to vote'],
+      over: ['🏆', 'Game over', g.over && g.over.winner === 'village' ? 'The village wins!' : 'The Sneaks win!'],
+    };
+    return map[g.phase] || ['', '', ''];
+  }
+  function phaseBanner(g) {
+    const subs = {
+      night: g.settling ? 'A quiet night. Nobody vanishes.' : 'The Sneaks are on the prowl…',
+      dawn: 'Who made it through the night?', day: 'Talk, share hints, find the Sneaks',
+      defense: `${P(g.nominees[g.defenseIdx])?.name || 'A nominee'} has 15 seconds`, vote: 'Tap a house to cast your vote',
+    };
+    const [emoji, title] = phaseInfo(g);
+    if (!subs[g.phase]) return;
+    const b = $('#banner');
+    b.innerHTML = `<span class="b-emoji">${emoji}</span><span class="b-title">${esc(title)}</span><span class="b-sub">${esc(subs[g.phase])}</span>`;
+    b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
+  }
 
   function renderGame() {
     showScreen('game');
     if (!gameBuilt) buildGame();
     const g = S.game;
-    setPhaseClass(g.phase === 'night' ? 'night' : g.phase === 'dawn' ? 'dawn' : 'day');
-    const phaseNames = { night: g.settling ? 'Settling-in night' : `Night ${g.day}`, dawn: 'Dawn', day: `Day ${g.day}`, defense: 'Defense', vote: `Vote · Day ${g.day}`, over: 'Game over' };
-    $('#phase-name').textContent = phaseNames[g.phase] || '';
+    setPhaseClass(g.phase === 'night' ? 'night' : g.phase === 'dawn' ? 'dawn' : (g.phase === 'vote' || g.phase === 'defense') ? 'vote' : 'day');
+    const [emoji, title, goal] = phaseInfo(g);
+    $('#hud-emblem').textContent = emoji; $('#phase-name').textContent = title; $('#hud-goal').textContent = goal;
     const r = ROLES[g.myRole];
     $('#role-chip').textContent = `${r.icon} ${r.name}`;
-    $('#role-chip').classList.toggle('sneaks', r.team === 'sneaks');
-    renderMap(); renderAction(); renderNotes(); renderTabs();
+    $('#role-chip').className = `role-chip ${teamClass(r.team)}`;
+    $('#pond-icon').textContent = { night: '🌙', dawn: '🌅', day: '☀️', defense: '🎤', vote: '🗳️', over: '🏆' }[g.phase] || '🌙';
+    renderMap(); renderAction(); renderSecrets(); renderTabs();
   }
 
-  function housePos(i, n, radius = 40) {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-    return [50 + radius * Math.cos(a), 50 + radius * Math.sin(a)];
+  function housePos(i, n) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n, rad = n > 10 ? 40 : 38;
+    return [50 + rad * Math.cos(a), 50 + rad * Math.sin(a)];
   }
   function renderMap() {
     const g = S.game, me = S.me, alive = new Set(g.alive), meAlive = alive.has(me);
-    const n = g.houses.length;
-    const pos = {}; g.houses.forEach((id, i) => { pos[id] = housePos(i, n, n > 10 ? 41 : 39); });
-    const team = new Set(g.team || []);
-    const lit = new Set(g.lit);
+    const pos = {}; g.houses.forEach((id, i) => { pos[id] = housePos(i, g.houses.length); });
+    const team = new Set(g.team || []), onTeam = team.has(me), lit = new Set(g.lit);
     const voteCount = {};
-    if (g.phase === 'vote' || g.phase === 'over') Object.entries(g.votes).forEach(([v, t]) => { if (t !== 'skip') voteCount[t] = (voteCount[t] || 0) + (g.turtles.includes(v) ? 2 : 1); });
+    if (g.phase === 'vote') Object.entries(g.votes).forEach(([v, t]) => { if (t !== 'skip') voteCount[t] = (voteCount[t] || 0) + (g.turtles.includes(v) ? 2 : 1); });
     const nomCount = {}; Object.values(g.noms || {}).forEach((t) => { nomCount[t] = (nomCount[t] || 0) + 1; });
     const teamPick = {}; if (g.teamVotes) Object.values(g.teamVotes).forEach((t) => { teamPick[t] = (teamPick[t] || 0) + 1; });
     const myPick = g.phase === 'night' ? (meAlive ? (g.mySneakVote || (g.myAction && g.myAction.target)) : null) : g.phase === 'vote' ? g.votes[me] : null;
-    const onTeam = team.has(me);
     const speaking = g.phase === 'defense' ? g.nominees[g.defenseIdx] : null;
     const targetable = (id) => {
-      if (g.phase === 'night') return meAlive && id !== me && alive.has(id) && !(onTeam && !g.settling && (team.has(id) || (lit.has(id) && !g.moleAlive)));
-      if (g.phase === 'vote') return meAlive && g.nominees.includes(id) && id !== me;
+      if (g.phase === 'night') return meAlive && !myPick && id !== me && alive.has(id) && !(onTeam && !g.settling && (team.has(id) || (lit.has(id) && !g.moleAlive)))
+        && !(g.myRole === 'hedgehog' && g.lastProtect === id) && !(g.myRole === 'lantern' && g.lastLight === id);
+      if (g.phase === 'vote') return meAlive && !g.votes[me] && g.nominees.includes(id) && id !== me;
       return false;
     };
     setHTML($('#houses'), g.houses.map((id) => {
       const p = P(id) || { name: '?' };
       const [x, y] = pos[id];
-      const cls = ['house', id === me && 'me', !alive.has(id) && 'dead', lit.has(id) && 'lit', team.has(id) && team.has(me) && 'teammate',
-        myPick === id && 'picked', targetable(id) && 'target', g.nominees.includes(id) && g.phase !== 'vote' && g.bigGame && 'nominee',
-        g.phase === 'vote' && g.bigGame && g.nominees.includes(id) && 'nominee', speaking === id && 'speaking'].filter(Boolean).join(' ');
+      const cls = ['house', id === me && 'me', !alive.has(id) && 'dead', lit.has(id) && 'lit', team.has(id) && onTeam && id !== me && 'teammate',
+        myPick === id && 'picked', targetable(id) && 'target', g.bigGame && g.nominees.includes(id) && 'nominee', speaking === id && 'speaking'].filter(Boolean).join(' ');
       const badges = [
         p.isAI ? '<span title="AI critter">🌰</span>' : '', g.turtles.includes(id) ? '<span title="Revealed Elder Turtle">🐢</span>' : '',
-        lit.has(id) ? '<span title="Lantern">🏮</span>' : '', team.has(id) && team.has(me) ? '<span title="Sneak team">🌑</span>' : '',
-        teamPick[id] ? `<span title="Team picks">🎯${teamPick[id]}</span>` : '', g.myMeddle === id ? '<span title="You are meddling here">🎭</span>' : '',
+        lit.has(id) ? '<span title="Lantern">🏮</span>' : '', teamPick[id] ? `<span title="Sneak team picks">🎯${teamPick[id]}</span>` : '',
+        g.myMeddle === id ? '<span title="You are meddling here">🎭</span>' : '',
         g.bigGame && nomCount[id] && g.phase === 'day' ? `<span title="Nominations">📌${nomCount[id]}</span>` : '',
       ].join('');
       return `<button class="${cls}" data-id="${id}" style="left:${x}%;top:${y}%" aria-label="${esc(p.name)}${alive.has(id) ? '' : ' (Wisp)'}">
-        ${voteCount[id] ? `<span class="votes">${voteCount[id]}</span>` : ''}
-        ${avatar(p)}<span class="nm">${esc(p.name)}</span><span class="badges">${badges}</span></button>`;
+        ${voteCount[id] ? `<span class="votes">${voteCount[id]}</span>` : ''}<span class="badges">${badges}</span>
+        ${cottage(p)}<span class="critter">${avatar(p)}</span><span class="nameplate">${esc(p.name)}${id === me ? ' (you)' : ''}</span></button>`;
     }).join(''));
-    $('#yarn').innerHTML = Object.entries(g.yarn || {}).filter(([a, b]) => pos[a] && pos[b])
-      .map(([a, b]) => `<line class="${a === me ? 'mine' : ''}" x1="${pos[a][0]}" y1="${pos[a][1]}" x2="${pos[b][0]}" y2="${pos[b][1]}"/>`).join('');
-    $('#pond-text').innerHTML = pondText();
-  }
-  function pondText() {
-    const g = S.game, meAlive = g.alive.includes(S.me), r = ROLES[g.myRole];
-    const sneakTurn = r.team === 'sneaks' && !g.settling;
-    switch (g.phase) {
-      case 'night': return meAlive ? `${g.settling ? 'Settling in' : 'The village sleeps'}<small>${sneakTurn ? 'Pick who to spirit away' : (g.settling && r.team === 'sneaks' ? 'Peek at a house' : r.verb)}</small>`
-        : 'You are a Wisp<small>Read every chat, even the Den</small>';
-      case 'dawn': { const last = [...g.log].reverse().find((l) => /^Dawn/.test(l.text)); return `Dawn<small>${esc(last ? last.text.replace(/^Dawn\. /, '') : '')}</small>`; }
-      case 'day': return `Day ${g.day}<small>${g.bigGame ? 'Tap a critter to nominate or tie yarn' : 'Tap a critter to tie yarn or accuse'}</small>`;
-      case 'defense': return `${nm(g.nominees[g.defenseIdx])} speaks<small>15 seconds to defend themselves</small>`;
-      case 'vote': return `Vote!<small>${meAlive ? 'Tap a house, or Skip' : 'The living are voting'}</small>`;
-      case 'over': return `${g.over.winner === 'village' ? 'Village wins' : 'Sneaks win'}<small>Check the recap</small>`;
-      default: return '';
-    }
+    setHTML($('#yarn'), Object.entries(g.yarn || {}).filter(([a, b]) => pos[a] && pos[b])
+      .map(([a, b]) => `<line class="${a === me ? 'mine' : ''}" x1="${pos[a][0]}" y1="${pos[a][1]}" x2="${pos[b][0]}" y2="${pos[b][1]}"/>`).join(''));
   }
 
   function onHouse(id) {
     const g = S.game, meAlive = g.alive.includes(S.me);
     if (g.phase === 'over') return;
     if (g.phase === 'night') {
-      if (!meAlive) return;
+      if (!meAlive) return toast("Wisps can't act at night. Peek at the Den in Chat!");
       if (id === S.me) return toast("Pick someone else's house.");
       if (!g.alive.includes(id)) return toast('That critter is already a Wisp.');
       if (g.myRole === 'hedgehog' && g.lastProtect === id) return toast("You can't protect the same critter two nights in a row.");
       if (g.myRole === 'lantern' && g.lastLight === id) return toast("You can't light the same house two nights in a row.");
       const onTeam = (g.team || []).includes(S.me) && !g.settling;
-      if (onTeam && g.team.includes(id)) return toast("That's your teammate.");
+      if (onTeam && g.team.includes(id)) return toast("That's your teammate!");
       if (onTeam && g.lit.includes(id) && !g.moleAlive) return toast('A lantern glows there. Only a Shadow Mole could tunnel in.');
       send({ t: 'night', target: id }); sound('pop'); return;
     }
@@ -441,86 +493,88 @@
     const meAlive = g.alive.includes(S.me), alive = g.alive.includes(id), self = id === S.me;
     const tied = g.yarn[S.me] === id, nominated = g.noms && g.noms[S.me] === id;
     const death = g.deaths.find((d) => d.id === id);
-    const m = modal(`<div class="row" style="gap:.8rem">${avatar(p, 'big')}<div><h2 style="margin:0">${esc(p.name)}</h2>
-      <div class="row" style="gap:.3rem;margin-top:.2rem">${p.isAI ? `<span class="tag ai">🌰 AI · ${p.aiLevel}</span>` : ''}${p.sprout ? '<span class="tag sprout">🌱 Sprout</span>' : ''}
-      ${!alive ? '<span class="tag">✨ Wisp</span>' : ''}</div></div></div>
-      <div class="row" style="margin-top:1rem">
-        ${meAlive && alive && !self ? `<button class="btn small" data-pm="yarn">${tied ? 'Untie yarn' : '🧶 Tie yarn (I suspect them)'}</button>` : ''}
-        ${meAlive && alive && !self && g.bigGame && g.phase === 'day' ? `<button class="btn small" data-pm="nom">${nominated ? 'Withdraw nomination' : '📌 Nominate'}</button>` : ''}
-        ${meAlive && alive && !self ? '<button class="btn small" data-pm="accuse">Accuse on the Board</button>' : ''}
-        <button class="btn small" data-pm="note">Add name to Notepad</button>
+    const m = modal(`<div class="row" style="gap:.9rem">${avatar(p, 'big')}<div><h2 style="margin:0">${esc(p.name)}</h2>
+      <div class="row" style="gap:.3rem;margin-top:.3rem">${p.isAI ? `<span class="tag ai">🌰 AI · ${p.aiLevel}</span>` : ''}${p.sprout ? '<span class="tag sprout">🌱 Sprout</span>' : ''}
+      ${!alive ? '<span class="tag">👻 Wisp</span>' : ''}${(g.team || []).includes(id) && (g.team || []).includes(S.me) ? '<span class="tag sneak">🌑 Teammate</span>' : ''}</div></div></div>
+      <div class="row" style="margin-top:1.1rem">
+        ${meAlive && alive && !self && g.bigGame && g.phase === 'day' ? `<button class="btn small honey" data-pm="nom">${nominated ? 'Withdraw nomination' : '📌 Nominate'}</button>` : ''}
+        ${meAlive && alive && !self ? `<button class="btn small" data-pm="yarn">${tied ? '✂️ Untie yarn' : '🧶 Tie yarn (I suspect them)'}</button>` : ''}
+        ${meAlive && alive && !self ? '<button class="btn small" data-pm="accuse">🧶 Post "I suspect"</button>' : ''}
+        <button class="btn small" data-pm="note">📝 Add to notes</button>
         ${!self && !p.isAI ? `<button class="btn small ghost" data-pm="mute">${ui.muted.has(id) ? 'Unmute' : 'Mute'} chat</button>` : ''}
       </div>
-      ${death ? `<div class="behind" style="margin-top:1rem"><b>Left behind</b>${notesHTML(death.notes)}</div>` : ''}`);
+      ${death ? `<div class="behind" style="margin-top:1rem"><b>👻 Left behind</b>${notesHTML(death.notes)}</div>` : ''}`, '', 'menu');
     m.addEventListener('click', (e) => {
       const b = e.target.closest('[data-pm]'); if (!b) return;
       const a = b.dataset.pm;
       if (a === 'yarn') send({ t: 'yarn', target: tied ? null : id });
       else if (a === 'nom') send({ t: 'nominate', target: nominated ? null : id });
-      else if (a === 'accuse') { ui.composer = 'accuse'; ui.tab = 'board'; ui.prefill = id; ui.compKey = null; renderTabs(); }
-      else if (a === 'note') insert($('#note-input'), p.name);
+      else if (a === 'accuse') send({ t: 'claim', kind: 'accuse', target: id });
+      else if (a === 'note') { ui.tab = 'notes'; renderTabs(); insert($('#note-input'), p.name); }
       else if (a === 'mute') { if (ui.muted.has(id)) ui.muted.delete(id); else ui.muted.add(id); renderChat(); }
       closeModal();
     });
   }
 
-  // ----- action card -----
+  // ----- role + task panel -----
   function renderAction() {
     const g = S.game, r = ROLES[g.myRole], meAlive = g.alive.includes(S.me);
     const team = g.team || [], onTeam = r.team === 'sneaks';
-    let prompt = '', done = false, extra = '';
+    let label = '', text = '', who = null, done = false, actions = '';
     if (g.phase === 'night') {
-      if (!meAlive) prompt = "You're a Wisp. While the village sleeps, read the Den and chat with the other Wisps.";
+      label = 'Tonight';
+      if (!meAlive) text = "You're a Wisp. Open Chat to read the Sneaks' Den and talk with other Wisps.";
       else if (onTeam && !g.settling) {
-        const picks = Object.entries(g.teamVotes || {}).map(([a, b]) => `${nm(a)} → ${nm(b)}`).join(', ');
-        prompt = g.mySneakVote ? `You picked ${nm(g.mySneakVote)}.` : 'Choose who to spirit away tonight.';
-        done = !!g.mySneakVote;
-        if (team.length > 1) extra += `<p class="small muted">Team picks: ${picks || 'none yet'}. Chat in the Den tab to agree.</p>`;
-        if (g.lit.length && !g.moleAlive) extra += '<p class="small muted">Houses with a glowing lantern are off limits tonight.</p>';
-        if (g.lit.length && g.moleAlive) extra += '<p class="small muted">Your Mole can tunnel under lanterns.</p>';
+        who = g.mySneakVote; done = !!who;
+        text = who ? 'You picked:' : 'Tap a house to choose who to spirit away.';
+        if (team.length > 1) actions += `<p class="small" style="margin:.4rem 0 0"><b>Team picks:</b> ${Object.entries(g.teamVotes || {}).map(([a, b]) => `${nm(a)} → ${nm(b)}`).join(', ') || 'none yet'}. Agree in the Den chat.</p>`;
+        if (g.lit.length) actions += `<p class="small muted" style="margin:.3rem 0 0">${g.moleAlive ? '🕳️ Your Mole can tunnel under lanterns.' : '🏮 Lantern-lit houses are off limits tonight.'}</p>`;
       } else {
-        const chosen = g.myAction && g.myAction.target;
-        prompt = chosen ? `You chose ${nm(chosen)}.` : g.settling && onTeam ? 'Settling-in night: nobody vanishes. Peek at a house to blend in.' : `${r.verb}: tap a house.`;
-        done = !!chosen;
-        if (g.myRole === 'hedgehog' && g.lastProtect) extra += `<p class="small muted">You can't protect ${nm(g.lastProtect)} again tonight.</p>`;
-        if (g.myRole === 'lantern' && g.lastLight) extra += `<p class="small muted">You can't light ${nm(g.lastLight)}'s house again tonight.</p>`;
+        who = g.myAction && g.myAction.target; done = !!who;
+        text = who ? 'You chose:' : g.settling && onTeam ? 'Quiet night: nobody vanishes. Peek at a house so you look normal.' : `${r.verb}: tap a house on the map.`;
+        if (g.myRole === 'hedgehog' && g.lastProtect) actions += `<p class="small muted" style="margin:.3rem 0 0">Can't protect ${nm(g.lastProtect)} twice in a row.</p>`;
+        if (g.myRole === 'lantern' && g.lastLight) actions += `<p class="small muted" style="margin:.3rem 0 0">Can't light ${nm(g.lastLight)}'s house twice in a row.</p>`;
       }
-    } else if (g.phase === 'dawn') prompt = 'Dawn. Check your Log for what you learned last night, and read anything left behind.';
+      if (meAlive && g.myRole === 'trickster') {
+        const opts = g.alive.filter((id) => id !== S.me && id !== g.lastMeddle).map((id) => `<option value="${id}" ${g.myMeddle === id ? 'selected' : ''}>${nm(id)}</option>`).join('');
+        actions += `<label class="field" style="margin-top:.6rem">🎭 Meddle with someone's night<select id="meddle-sel"><option value="">Nobody tonight</option>${opts}</select></label>`;
+      }
+    } else if (g.phase === 'dawn') { label = 'Morning'; text = 'Check the morning report and what you learned last night.'; }
     else if (g.phase === 'day') {
-      if (!meAlive) prompt = "You're a Wisp. You can read every chat and talk with other Wisps.";
+      label = 'Today';
+      if (!meAlive) text = "You're a Wisp. Watch, read the notepads, chat with other Wisps.";
       else {
-        prompt = g.bigGame ? (g.noms[S.me] ? `You nominated ${nm(g.noms[S.me])}.` : 'Talk it over, then tap a critter to nominate them.') : 'Talk it over. Post claims on the Board and tie yarn to your suspect.';
-        done = g.bigGame && !!g.noms[S.me];
-        extra += `<button class="btn small ${g.iReady ? 'on' : ''}" data-a="ready" ${g.iReady ? 'disabled' : ''}>${g.iReady ? 'Ready ✓' : 'Ready to vote'}</button>
-          <span class="small muted"> ${g.readyCount}/${g.alive.length} ready</span>`;
+        text = g.bigGame && g.noms[S.me] ? 'You nominated:'
+          : `<ol><li>Read the Board</li><li>Share what you learned</li>${g.bigGame ? '<li>Tap a critter → Nominate</li>' : ''}<li>Press Ready to vote</li></ol>`;
+        if (g.bigGame) { who = g.noms[S.me]; done = !!who; }
+        actions += `<button class="btn small ${g.iReady ? 'on' : 'honey'}" data-a="ready" ${g.iReady ? 'disabled' : ''}>${g.iReady ? '✓ Ready' : '🙋 Ready to vote'}</button>
+          <span class="small muted" style="font-weight:800">${g.readyCount}/${g.alive.length} ready</span>`;
       }
-    } else if (g.phase === 'defense') prompt = `${nm(g.nominees[g.defenseIdx])} has 15 seconds to defend themselves. Nominees: ${g.nominees.map(nm).join(', ')}.`;
+    } else if (g.phase === 'defense') { label = 'Defense'; text = `${nm(g.nominees[g.defenseIdx])} is defending. Nominees:`; actions = `<div class="team-list">${g.nominees.map((id) => `<span class="tag">${nm(id)}</span>`).join('')}</div>`; }
     else if (g.phase === 'vote') {
-      if (!meAlive) prompt = 'The living are voting.';
+      label = 'Vote';
+      if (!meAlive) text = 'The living are voting.';
       else {
         const v = g.votes[S.me];
-        prompt = v ? (v === 'skip' ? 'You voted to skip.' : `You voted for ${nm(v)}.`) : 'Tap a highlighted house to vote.';
-        done = !!v;
-        extra += `<button class="btn small ${v === 'skip' ? 'on' : ''}" data-a="skip">Skip vote</button>`;
-        if (g.turtles.includes(S.me)) extra += '<p class="small muted">Your vote counts double.</p>';
+        done = !!v; who = v && v !== 'skip' ? v : null;
+        text = v ? (v === 'skip' ? 'You voted to skip.' : 'You voted for:') : 'Tap the house of who you think is a Sneak.';
+        actions += `<button class="btn small ${v === 'skip' ? 'on' : ''}" data-a="skip">${v === 'skip' ? '✓ Skipped' : '🤷 Skip'}</button>${v ? '<span class="small muted">Tap again to change</span>' : ''}`;
+        if (g.turtles.includes(S.me)) actions += '<span class="small muted">🐢 Your vote counts double.</span>';
       }
-    } else if (g.phase === 'over') prompt = 'The game is over.';
+    } else if (g.phase === 'over') { label = 'Game over'; text = g.over && g.over.winners.includes(S.me) ? 'You won! 🎉' : 'Better luck next time!'; }
+    const shareable = meAlive && ['dawn', 'day', 'defense', 'vote'].includes(g.phase) ? lastResult(g) : null;
+    if (shareable) actions += `<button class="btn small leaf share-btn" data-a="share">📣 Share last night's result</button>`;
     if (g.myRole === 'turtle' && meAlive && !g.turtles.includes(S.me) && ['day', 'dawn', 'defense', 'vote'].includes(g.phase)) {
-      extra += `<div style="margin-top:.5rem"><button class="btn small honey" data-a="reveal">🐢 Reveal as Elder Turtle</button></div>`;
+      actions += `<button class="btn small lilac" data-a="reveal">🐢 Reveal myself</button>`;
     }
-    if (g.phase === 'night' && meAlive && g.myRole === 'trickster') {
-      const opts = g.alive.filter((id) => id !== S.me && id !== g.lastMeddle).map((id) => `<option value="${id}" ${g.myMeddle === id ? 'selected' : ''}>${nm(id)}</option>`).join('');
-      extra += `<label class="field" style="margin-top:.5rem">🎭 Meddle with someone's night<select id="meddle-sel"><option value="">Nobody tonight</option>${opts}</select></label>
-        <p class="small muted">If they use an info ability tonight, their result comes out slightly wrong.</p>`;
-    }
-    const results = g.phase !== 'night' && g.phase !== 'over' && meAlive ? g.myLog.filter((l) => l.text.startsWith(`Night ${g.day}:`)) : [];
-    const lastNight = results.length ? `<div class="last-night"><b>Last night you learned</b>${results.map((l) => esc(l.text.replace(/^Night \d+: /, ''))).join('<br>')}
-      <br><button class="btn small" data-a="jot">Copy to Notepad</button></div>` : '';
-    const teamTags = onTeam && team.length > 1 ? `<div class="team-list">${team.filter((id) => id !== S.me).map((id) => `<span class="tag sneak">${ROLES[(g.teamRoles || {})[id]]?.icon || '🌑'} ${nm(id)}${g.alive.includes(id) ? '' : ' ✨'}</span>`).join('')}</div>` : '';
-    setHTML($('#action-card'), `<h3>${r.icon} ${r.name} <span class="tag ${onTeam ? 'sneak' : ''}">${TEAM_NAMES[r.team]}</span></h3>
-      <p class="ability muted">${r.ability}</p>${teamTags}
-      <div class="prompt ${done ? 'done' : ''}">${prompt}</div>${lastNight}${extra}
-      <button class="link small" data-a="role" style="margin-top:.5rem">Read my role card</button>`);
+    const teamTags = onTeam && team.length > 1 ? `<div class="team-list"><span class="small" style="font-weight:800">Your team:</span>${team.filter((id) => id !== S.me).map((id) => `<span class="tag sneak">${ROLES[(g.teamRoles || {})[id]]?.icon || '🌑'} ${nm(id)}${g.alive.includes(id) ? '' : ' 👻'}</span>`).join('')}</div>` : '';
+    const whoHTML = who ? `<div class="pick-who">${avatar(P(who), 'sm')} ${nm(who)}</div>` : '';
+    setHTML($('#action-card'), `<div class="role-head"><div class="role-art ${teamClass(r.team)}">${r.icon}</div>
+      <div><div class="role-name">${r.name}</div><span class="tag ${teamClass(r.team)}">Team ${TEAM_NAMES[r.team]}</span></div></div>
+      <p class="goal">🎯 ${GOALS[r.team]}</p>${teamTags}
+      <div class="task ${done ? 'done' : ''}"><div class="task-label">${label}</div><div class="task-text">${text}</div>${whoHTML}</div>
+      <div class="role-actions">${actions}</div>
+      <button class="link small" data-a="role" style="margin-top:.6rem">How does my role work?</button>`);
   }
   function onActionClick(e) {
     const b = e.target.closest('[data-a]'); if (!b) return;
@@ -528,42 +582,59 @@
     if (a === 'ready') send({ t: 'ready' });
     else if (a === 'skip') send({ t: 'vote', target: S.game.votes[S.me] === 'skip' ? null : 'skip' });
     else if (a === 'reveal') { if (confirm('Reveal yourself as the Elder Turtle? Everyone will know, and your vote will count double.')) send({ t: 'reveal' }); }
-    else if (a === 'role') openRoleCard();
-    else if (a === 'jot') {
-      const g = S.game;
-      g.myLog.filter((l) => l.text.startsWith(`Night ${g.day}:`)).forEach((l) => send({ t: 'note', text: l.text.replace(/^Night \d+: (you )?/, '') }));
-      toast('Saved to your Notepad.');
+    else if (a === 'role') queueModal(() => showRoleReveal(true));
+    else if (a === 'share') {
+      const r = lastResult(S.game); if (!r) return;
+      if (r.hint) send({ t: 'claim', kind: 'hint', targets: r.hint.group, result: r.hint.yes ? 'sneak' : 'not' });
+      else if (r.saw) r.saw.visitors.forEach((v) => send({ t: 'claim', kind: 'saw', target: v, at: r.saw.house }));
+      ui.shared = ui.shared || new Set(); ui.shared.add(r.key);
+      ui.tab = 'board'; renderTabs(); renderAction(); sound('pop'); toast('Posted to the Board 📣');
     }
   }
-  function openRoleCard() {
-    const r = ROLES[S.game.myRole];
-    modal(`<div class="role-card"><span class="big-icon">${r.icon}</span><h2>${r.name}</h2><div class="team">Team: ${TEAM_NAMES[r.team]}</div>
-      <p style="margin-top:.8rem">${r.ability}</p><p class="muted"><b>Tip:</b> ${r.tip}</p></div>`);
+  function lastResult(g) {
+    const e = [...g.myLog].reverse().find((l) => (l.hint || (l.saw && l.saw.visitors.length)));
+    if (!e) return null;
+    const key = e.text;
+    if (ui.shared && ui.shared.has(key)) return null;
+    return { ...e, key };
+  }
+
+  // ----- what you know -----
+  function renderSecrets() {
+    const g = S.game;
+    const items = g.myLog.filter((l) => /^Night \d+:/.test(l.text)).reverse();
+    const latest = g.phase === 'night' ? g.day - 1 : g.day;
+    setHTML($('#secrets'), items.map((l) => {
+      const n = l.text.match(/^Night (\d+):/)[1];
+      const body = l.text.replace(/^Night \d+: /, '');
+      const clean = body.replace(/^you /, '');
+      return `<div class="secret ${Number(n) === latest ? 'new' : ''}"><span class="when">N${n}</span><span>${esc(body.charAt(0).toUpperCase() + body.slice(1))}</span>
+        ${g.alive.includes(S.me) ? `<button class="jot" data-jot="${esc(clean)}" title="Copy to Notepad" aria-label="Copy to Notepad">📝</button>` : ''}</div>`;
+    }).join('') || '<div class="empty-hint"><span class="big">🔮</span>Your night results show up here each morning.</div>');
   }
 
   // ----- notepad -----
   function notesHTML(notes) {
-    if (!notes || !notes.length) return '<p class="small muted" style="margin:.3rem 0 0">Their notepad was empty.</p>';
+    if (!notes || !notes.length) return '<p class="small muted" style="margin:.3rem 0 0">Their notepad was empty. Suspicious?</p>';
     return `<ol>${notes.map((n) => `<li><span class="stamp">${esc(n.stamp)}</span>${esc(n.text)}</li>`).join('')}</ol>`;
   }
   function renderNotes() {
     const g = S.game, notes = g.myNotes || [];
     const used = notes.reduce((s, n) => s + n.text.length, 0);
-    $('#note-count').textContent = `${used}/500`;
-    $('#note-list').innerHTML = notes.map((n) => `<li><span class="stamp">${esc(n.stamp)}</span>${esc(n.text)}</li>`).join('') || '<li class="muted">No notes yet. Write down what you learn each night.</li>';
+    $('#note-count').textContent = `${used}/500 characters`;
+    setHTML($('#note-list'), notes.map((n) => `<li><span class="stamp">${esc(n.stamp)}</span>${esc(n.text)}</li>`).join('') || '<li class="muted">No notes yet. Tap 📝 next to anything in "What you know" to save it here.</li>');
     const meAlive = g.alive.includes(S.me);
     $('#note-input').disabled = !meAlive || g.phase === 'over';
-    $('#note-input').placeholder = meAlive ? 'Write a note…' : 'Your notepad is locked. Everyone can read it now.';
-    const roleWords = ['at least one is a Sneak', 'none are Sneaks', 'visited', 'Owl', 'Hedgehog', 'Sneak'];
-    $('#note-chips').innerHTML = meAlive ? g.alive.filter((id) => id !== S.me).map((id) => `<button class="chip" type="button" data-ins="${nm(id)}">${nm(id)}</button>`).join('')
-      + roleWords.map((w) => `<button class="chip" type="button" data-ins="${w}">${w}</button>`).join('') : '';
+    $('#note-input').placeholder = meAlive ? 'Write a note…' : 'Your notepad is public now.';
+    setHTML($('#note-chips'), meAlive ? g.alive.filter((id) => id !== S.me).map((id) => `<button class="chip" type="button" data-ins="${nm(id)}">${nm(id)}</button>`).join('')
+      + ['is a Sneak?', 'seems safe', 'visited'].map((w) => `<button class="chip" type="button" data-ins="${w}">${w}</button>`).join('') : '');
   }
 
   // ----- tabs -----
   function renderTabs() {
     $$('#tabs [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === ui.tab));
-    ['board', 'chat', 'behind', 'log'].forEach((t) => $(`#tab-${t}`).classList.toggle('hidden', t !== ui.tab));
-    renderBoard(); renderChat(); renderBehind(); renderLog();
+    ['board', 'chat', 'notes', 'behind', 'log'].forEach((t) => $(`#tab-${t}`).classList.toggle('hidden', t !== ui.tab));
+    renderBoard(); renderChat(); renderNotes(); renderBehind(); renderLog();
   }
   function renderBoard() {
     const g = S.game, meAlive = g.alive.includes(S.me);
@@ -572,37 +643,39 @@
     const playerOpts = (list, sel) => list.map((id) => `<option value="${id}" ${sel === id ? 'selected' : ''}>${nm(id)}</option>`).join('');
     const v = (id) => $(id)?.value;
     const prev = { role: v('#cp-role'), t1: v('#cp-t1'), t2: v('#cp-t2'), t3: v('#cp-t3'), result: v('#cp-result'), target: v('#cp-target'), at: v('#cp-at') };
-    if (ui.prefill) { prev.target = ui.prefill; ui.prefill = null; }
     const others = g.houses.filter((id) => id !== S.me);
-    const kinds = [['role', 'My role'], ['hint', 'My hint'], ['saw', 'I saw'], ['accuse', 'Suspect']];
+    const kinds = [['hint', '🦉 Hint'], ['saw', '👀 I saw'], ['role', '🎭 My role']];
+    if (!kinds.some(([k]) => k === ui.composer)) ui.composer = 'hint';
     let fields = '';
     if (ui.composer === 'role') fields = `<select id="cp-role" aria-label="Role">${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${prev.role === k ? 'selected' : ''}>${r.icon} I'm the ${r.name}</option>`).join('')}</select>`;
     else if (ui.composer === 'hint') {
       const sel = (idn, cur, blank) => `<select id="${idn}" aria-label="Critter">${blank ? '<option value="">—</option>' : ''}${playerOpts(others, cur)}</select>`;
-      fields = `${sel('cp-t1', prev.t1, false)}${sel('cp-t2', prev.t2 ?? '', true)}${sel('cp-t3', prev.t3 ?? '', true)}
-      <select id="cp-result" aria-label="Result"><option value="sneak" ${prev.result === 'sneak' ? 'selected' : ''}>at least one is a Sneak</option><option value="clear" ${prev.result === 'clear' ? 'selected' : ''}>none of them are Sneaks</option></select>`;
-    } else if (ui.composer === 'saw') fields = `<select id="cp-target" aria-label="Who">${playerOpts(others, prev.target)}</select>
-      <span class="small">visited</span><select id="cp-at" aria-label="Whose house">${playerOpts(g.houses, prev.at)}</select><span class="small">'s house</span>`;
-    else fields = `<select id="cp-target" aria-label="Suspect">${playerOpts(g.alive.filter((id) => id !== S.me), prev.target)}</select>`;
-    const compKey = [ui.composer, others.join(), g.alive.join(), canPost, prev.target, S.players.map((p) => p.name).join()].join('|');
-    if (ui.compKey !== compKey || !comp.firstChild) { ui.compKey = compKey; comp.innerHTML = `<div class="seg" role="tablist">${kinds.map(([k, l]) => `<button data-cp="${k}" class="${ui.composer === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      fields = `<span class="small" style="flex-basis:100%;font-weight:800">At least one of…</span>${sel('cp-t1', prev.t1, false)}${sel('cp-t2', prev.t2 ?? '', true)}${sel('cp-t3', prev.t3 ?? '', true)}
+      <select id="cp-result" aria-label="Result"><option value="sneak" ${prev.result === 'sneak' ? 'selected' : ''}>…is a Sneak 🚨</option><option value="not" ${prev.result === 'not' ? 'selected' : ''}>…is NOT a Sneak 🍃</option></select>`;
+    } else fields = `<select id="cp-target" aria-label="Who">${playerOpts(others, prev.target)}</select>
+      <span class="small" style="font-weight:800">visited</span><select id="cp-at" aria-label="Whose house">${playerOpts(g.houses, prev.at)}</select>`;
+    const compKey = [ui.composer, others.join(), g.alive.join(), canPost, S.players.map((p) => p.name).join()].join('|');
+    if (ui.compKey !== compKey || !comp.firstChild) {
+      ui.compKey = compKey;
+      comp.innerHTML = `<div class="composer-title">Post a card</div><div class="seg" role="tablist">${kinds.map(([k, l]) => `<button data-cp="${k}" class="${ui.composer === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div class="row">${fields}</div>
       <div class="row"><button class="btn small primary" data-post ${canPost ? '' : 'disabled'}>Post card</button>
-      <span class="small muted">${canPost ? 'Cards read the same in every language.' : meAlive ? 'You can post cards from dawn until the vote ends.' : 'Wisps can read the Board but not post.'}</span></div>`; }
-    const icon = (c) => ({ role: ROLES[c.role]?.icon, hint: c.result === 'sneak' ? '🚨' : '🔍', saw: '👀', accuse: '🧶' }[c.kind]);
+      <span class="small muted">${canPost ? 'Anyone can post anything. Sneaks lie too!' : meAlive ? 'Cards open at dawn.' : 'Wisps can read but not post.'}</span></div>`;
+    }
     const names = (ids) => { const a = ids.map((x) => `<b>${nm(x)}</b>`); return a.length < 3 ? a.join(' and ') : `${a[0]}, ${a[1]}, and ${a[2]}`; };
-    const text = (c) => {
-      if (c.kind === 'role') return `I'm the <b>${ROLES[c.role].name}</b>.`;
-      if (c.kind === 'hint') return c.result === 'sneak' ? `At least one of ${names(c.targets)} is a Sneak.` : `None of ${names(c.targets)} is a Sneak.`;
-      if (c.kind === 'saw') return `I saw <b>${nm(c.target)}</b> visit <b>${nm(c.at)}</b>'s house.`;
-      return `I suspect <b>${nm(c.target)}</b>.`;
+    const card = (c) => {
+      if (c.kind === 'role') return ['', ROLES[c.role]?.icon, `I'm the <b>${ROLES[c.role].name}</b>.`];
+      if (c.kind === 'hint') return c.result === 'sneak' ? ['hint-sneak', '🚨', `At least one of ${names(c.targets)} is a Sneak.`] : ['hint-not', '🍃', `At least one of ${names(c.targets)} is NOT a Sneak.`];
+      if (c.kind === 'saw') return ['saw', '👀', `I saw <b>${nm(c.target)}</b> visit <b>${nm(c.at)}</b>'s house.`];
+      return ['', '🧶', `I suspect <b>${nm(c.target)}</b>.`];
     };
     const days = [...new Set(g.claims.map((c) => c.day))].sort((a, b) => b - a);
-    $('#claim-list').innerHTML = days.map((d) => `<div class="day-head">Day ${d}</div>` + g.claims.filter((c) => c.day === d).reverse().map((c) => `
-      <div class="claim ${d < g.day ? 'old' : ''}">${avatar(P(c.by), 'sm')}<div class="body"><b>${nm(c.by)}</b>${g.alive.includes(c.by) ? '' : ' ✨'}<br>${icon(c)} ${text(c)}</div>
+    setHTML($('#claim-list'), days.map((d) => `<div class="day-head">Day ${d}</div>` + g.claims.filter((c) => c.day === d).reverse().map((c) => {
+      const [cls, icon, text] = card(c);
+      return `<div class="claim ${cls} ${d < g.day ? 'old' : ''}">${avatar(P(c.by), 'sm')}<div class="body"><b>${nm(c.by)}</b>${g.alive.includes(c.by) ? '' : ' 👻'}<br><span class="kind">${icon}</span> ${text}</div>
       <div class="react"><button data-react="trust" data-id="${c.id}" class="${c.trust.includes(S.me) ? 'on' : ''}" aria-label="Trust">👍 ${c.trust.length}</button>
-      <button data-react="doubt" data-id="${c.id}" class="${c.doubt.includes(S.me) ? 'on' : ''}" aria-label="Doubt">👎 ${c.doubt.length}</button></div></div>`).join('')).join('')
-      || '<p class="muted small">No cards yet. Claim your role, share a result, or name a suspect.</p>';
+      <button data-react="doubt" data-id="${c.id}" class="${c.doubt.includes(S.me) ? 'on' : ''}" aria-label="Doubt">👎 ${c.doubt.length}</button></div></div>`;
+    }).join('')).join('') || '<div class="empty-hint"><span class="big">📋</span>No cards yet. Owls post hints, Bunnies post sightings, anyone can claim a role.</div>');
   }
   function onBoardClick(e) {
     const cp = e.target.closest('[data-cp]');
@@ -610,8 +683,7 @@
     if (e.target.closest('[data-post]')) {
       if (ui.composer === 'role') send({ t: 'claim', kind: 'role', role: $('#cp-role').value });
       else if (ui.composer === 'hint') send({ t: 'claim', kind: 'hint', targets: ['#cp-t1', '#cp-t2', '#cp-t3'].map((x) => $(x).value).filter(Boolean), result: $('#cp-result').value });
-      else if (ui.composer === 'saw') send({ t: 'claim', kind: 'saw', target: $('#cp-target').value, at: $('#cp-at').value });
-      else send({ t: 'claim', kind: 'accuse', target: $('#cp-target').value });
+      else send({ t: 'claim', kind: 'saw', target: $('#cp-target').value, at: $('#cp-at').value });
       sound('pop'); return;
     }
     const r = e.target.closest('[data-react]');
@@ -625,62 +697,149 @@
     const g = S.game, meAlive = g.alive.includes(S.me), onTeam = ROLES[g.myRole].team === 'sneaks', over = g.phase === 'over';
     const chans = [['day', '🏡 Village']];
     if (onTeam || !meAlive || over) chans.push(['den', '🌑 Den']);
-    if (!meAlive || over) chans.push(['wisp', '✨ Wisps']);
+    if (!meAlive || over) chans.push(['wisp', '👻 Wisps']);
     if (!chans.some(([k]) => k === ui.chatCh)) ui.chatCh = chans[0][0];
-    $('#chat-channels').innerHTML = chans.length > 1 ? chans.map(([k, l]) => `<button class="chip ${ui.chatCh === k ? 'on' : ''}" style="${ui.chatCh === k ? 'background:var(--honey);color:#2E3A2B' : ''}" data-ch="${k}">${l}</button>`).join('') : '';
+    setHTML($('#chat-channels'), chans.length > 1 ? chans.map(([k, l]) => `<button class="chip ${ui.chatCh === k ? 'on' : ''}" data-ch="${k}">${l}</button>`).join('') : '');
     const list = $('#chat-list');
-    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 50;
     const msgs = g.chat[ui.chatCh] || [];
-    list.innerHTML = msgs.filter((m) => !ui.muted.has(m.by)).map((m) => `<div class="msg">${avatar(P(m.by), 'xs')}<div><b>${nm(m.by)}</b> ${esc(m.text)}</div></div>`).join('')
-      || `<p class="muted small">${ui.chatCh === 'den' ? 'Only the Sneak team can read this.' : ui.chatCh === 'wisp' ? 'Only Wisps can read this.' : 'Say hello. Chat is optional: the Board works in every language.'}</p>`;
+    setHTML(list, msgs.filter((m) => !ui.muted.has(m.by)).map((m) => `<div class="msg ${m.by === S.me ? 'mine' : ''}">${avatar(P(m.by), 'xs')}<div class="bubble-txt"><b>${nm(m.by)}</b>${esc(m.text)}</div></div>`).join('')
+      || `<div class="empty-hint"><span class="big">💬</span>${ui.chatCh === 'den' ? 'Only the Sneak team can read this.' : ui.chatCh === 'wisp' ? 'Only Wisps can read this.' : 'Say hi! Chat opens during the day.'}</div>`);
     if (atBottom) list.scrollTop = list.scrollHeight;
-    const canType = over || !meAlive || ui.chatCh === 'den' || g.phase !== 'night';
     const myChanOk = over ? ui.chatCh === 'day' : !meAlive ? ui.chatCh === 'wisp' : ui.chatCh !== 'wisp';
+    const canType = over || !meAlive || ui.chatCh === 'den' || g.phase !== 'night';
     $('#chat-input').disabled = !(canType && myChanOk);
-    $('#chat-input').placeholder = !meAlive && !over ? 'Talk with the other Wisps…' : g.phase === 'night' && ui.chatCh === 'day' && !over ? 'The village is asleep. Chat opens at dawn.' : 'Say something…';
-    if (!meAlive && !over && ui.chatCh !== 'wisp') $('#chat-input').placeholder = 'Wisps can only talk in the Wisps channel.';
+    $('#chat-input').placeholder = !myChanOk ? (meAlive ? 'Switch channels to talk.' : 'Wisps talk in the Wisps channel.') : !canType ? 'The village is asleep 💤' : 'Say something…';
     const total = g.chat.day.length + g.chat.den.length + g.chat.wisp.length;
     if (ui.tab === 'chat') ui.seenChat = total;
     $('#chat-dot').classList.toggle('hidden', ui.tab === 'chat' || total <= ui.seenChat);
   }
   function renderBehind() {
     const g = S.game;
-    $('#tab-behind').innerHTML = [...g.deaths].reverse().map((d) => `<div class="behind"><div class="row">${avatar(P(d.id), 'sm')}<b>${nm(d.id)}</b>
-      <span class="small muted">${d.how === 'pond' ? `sent into the Pond on day ${d.day}` : `spirited away on night ${d.day}`}</span></div>${notesHTML(d.notes)}</div>`).join('')
-      || "<p class=\"muted small\">Nobody is gone yet. When a critter is eliminated, their role stays secret but their notepad shows up here.</p>";
+    setHTML($('#tab-behind'), [...g.deaths].reverse().map((d) => `<div class="behind"><div class="row">${avatar(P(d.id), 'sm')}<b>${nm(d.id)}</b>
+      <span class="small muted">${d.how === 'pond' ? `💦 voted into the Pond, day ${d.day}` : `🌙 vanished on night ${d.day}`}</span></div>${notesHTML(d.notes)}</div>`).join('')
+      || '<div class="empty-hint"><span class="big">👻</span>Nobody is gone yet. When a critter is eliminated, their role stays secret but their notepad shows up here.</div>');
   }
   function renderLog() {
     const g = S.game;
-    $('#tab-log').innerHTML = `<h3>Only you can see</h3>${[...g.myLog].reverse().map((l) => `<div class="log-item private">${esc(l.text)}</div>`).join('')}
-      <h3 style="margin-top:.6rem">Village log</h3>${[...g.log].reverse().map((l) => `<div class="log-item">${esc(l.text)}</div>`).join('')}`;
+    setHTML($('#tab-log'), [...g.log].reverse().map((l) => `<div class="log-item">${esc(l.text)}</div>`).join(''));
   }
 
-  // ----- game over -----
+  // ----- speech bubbles, emotes, splash -----
+  function houseXY(id) { const h = $(`.house[data-id="${id}"]`); return h ? [h.style.left, h.style.top] : null; }
+  function showSpeech(g) {
+    const chans = ['day']; if ((g.team || []).includes(S.me) || !g.alive.includes(S.me)) chans.push('den');
+    for (const ch of chans) for (const m of g.chat[ch] || []) {
+      if (m.ts <= (ui.bubbleTs || 0) || ui.muted.has(m.by)) continue;
+      const xy = houseXY(m.by); if (!xy) continue;
+      const el = document.createElement('div');
+      el.className = 'speech'; el.textContent = m.text.length > 70 ? `${m.text.slice(0, 68)}…` : m.text;
+      el.style.left = xy[0]; el.style.top = xy[1];
+      $('#floaters').appendChild(el); setTimeout(() => el.remove(), 3700);
+    }
+    const all = chans.flatMap((c) => g.chat[c] || []);
+    if (all.length) ui.bubbleTs = Math.max(ui.bubbleTs || 0, ...all.map((m) => m.ts));
+  }
+  function floatEmote(id, e) {
+    const xy = houseXY(id), layer = $('#floaters'); if (!xy || !layer) return;
+    const f = document.createElement('div');
+    f.className = 'floater'; f.textContent = e; f.style.left = xy[0]; f.style.top = xy[1];
+    layer.appendChild(f); setTimeout(() => f.remove(), 1900);
+  }
+  function splashPond(id) {
+    const h = $(`.house[data-id="${id}"]`); if (h) h.classList.add('splash');
+    const pond = $('#pond'); if (pond) { pond.classList.remove('splash'); void pond.offsetWidth; pond.classList.add('splash'); }
+    sound('splash');
+  }
+
+  // ================= OVERLAYS =================
+  function showRoleReveal(again = false) {
+    const g = S.game; if (!g) return closeModal();
+    const r = ROLES[g.myRole], tc = teamClass(r.team);
+    const mates = (g.team || []).filter((id) => id !== S.me);
+    const m = modal(`<div class="modal-hero">
+      <div style="font-weight:800" class="muted">${again ? 'Your role' : 'Your secret role is…'}</div>
+      <div class="flip ${again ? 'flipped' : ''}" id="flip"><div class="flip-inner">
+        <div class="flip-face flip-front">❓</div>
+        <div class="flip-face flip-back ${tc}"><span class="icon">${r.icon}</span><span class="nm">${r.name}</span><span class="tm">Team ${TEAM_NAMES[r.team]}</span></div>
+      </div></div></div>
+      <div class="howto">
+        <div><span>🎯</span><span>${GOALS[r.team]}</span></div>
+        <div><span>🌙</span><span>${r.ability}</span></div>
+        ${mates.length ? `<div><span>🌑</span><span>Your teammates: <b>${mates.map((id) => nm(id)).join(', ')}</b>. Plot together in the Den chat.</span></div>` : ''}
+        <div><span>💡</span><span>${r.tip}</span></div>
+        ${again ? '' : '<div><span>🤫</span><span>Keep it secret! Roles are only revealed when the game ends.</span></div>'}
+      </div>
+      <div style="text-align:center"><button class="btn primary big" data-close>${again ? 'Got it' : "Let's go!"}</button></div>`, '', 'role');
+    if (!again) { setTimeout(() => $('#flip', m)?.classList.add('flipped'), 600); setTimeout(() => sound('chime'), 700); }
+  }
+  function showDawn(e) {
+    const g = S.game; if (!g) return closeModal();
+    const died = e.died || [];
+    const mine = died.includes(S.me);
+    const learned = g.myLog.filter((l) => l.text.startsWith(`Night ${e.night}:`));
+    let body;
+    if (died.length) {
+      body = died.map((id) => {
+        const d = g.deaths.find((x) => x.id === id);
+        return `<div class="victim">${avatar(P(id), 'big')}<div class="splash-txt">${nm(id)} vanished!</div></div>
+          <p style="text-align:center">${mine ? "That's you! You're a Wisp now. You can read every chat, even the Sneaks' Den." : 'Their role stays secret, but they left their notepad behind:'}</p>
+          ${mine ? '' : `<div class="behind">${notesHTML(d && d.notes)}</div>`}`;
+      }).join('');
+    } else body = `<div class="splash-txt" style="margin:.6rem 0">${e.night <= 1 || (e.saved === false && !died.length && g.day <= 2 && e.night === 1) ? '🌼 A quiet night in the Hollow.' : e.saved ? '🦔 Everyone is safe! Someone was protected.' : '🌼 Everyone woke up safe.'}</div>`;
+    const lit = (e.lit || []).length ? `<p class="small" style="text-align:center">🏮 A lantern now glows at ${e.lit.map((x) => `${nm(x)}'s house`).join(' and ')} for tonight.</p>` : '';
+    const learnedHTML = learned.length && g.alive.includes(S.me) ? `<h3 style="margin-top:1rem">🔮 What you learned</h3>${learned.map((l) => { const t = l.text.replace(/^Night \d+: /, ''); return `<div class="secret new"><span>${esc(t.charAt(0).toUpperCase() + t.slice(1))}</span></div>`; }).join('')}` : '';
+    const m = modal(`<div class="modal-hero"><span class="big-emoji">🌅</span><h2>Morning in the Hollow</h2></div>${body}${lit}${learnedHTML}
+      <div style="text-align:center;margin-top:1rem"><button class="btn primary big" data-close>Start the day ☀️</button></div>`, '', `dawn${e.id}`);
+    setTimeout(() => { if ($('#overlay').dataset.kind === `dawn${e.id}`) closeModal(); }, 13000);
+    return m;
+  }
+  function showPond(e) {
+    const g = S.game; if (!g) return closeModal();
+    const entries = Object.entries(e.tally || {}).sort((a, b) => b[1] - a[1]);
+    const max = Math.max(1, e.skip || 0, ...entries.map(([, v]) => v));
+    const bars = entries.map(([id, v]) => `<div class="bar">${avatar(P(id), 'sm')}<span class="bn">${nm(id)}</span><div class="track"><div class="fill" style="--w:${(v / max) * 100}%"></div></div><span>${v}</span></div>`).join('')
+      + (e.skip ? `<div class="bar skip"><span style="text-align:center">🤷</span><span class="bn">Skip</span><div class="track"><div class="fill" style="--w:${(e.skip / max) * 100}%"></div></div><span>${e.skip}</span></div>` : '');
+    const result = e.out ? `<div class="victim">${avatar(P(e.out), 'big')}<div class="splash-txt">💦 Splash! ${nm(e.out)} goes into the Pond.</div></div>
+      <p style="text-align:center">${e.out === S.me ? "That's you! You're a Wisp now." : 'Their role stays secret. Read their notepad in 👻 Gone.'}</p>`
+      : '<div class="splash-txt" style="margin:.6rem 0">🤝 No clear majority. Nobody goes in today.</div>';
+    modal(`<div class="modal-hero"><span class="big-emoji">🗳️</span><h2>The votes are in!</h2></div>
+      <div class="bars">${bars || '<p class="muted" style="text-align:center">Nobody voted.</p>'}</div>${result}
+      <div style="text-align:center;margin-top:1rem"><button class="btn primary big" data-close>Continue</button></div>`, '', `pond${e.id}`);
+    setTimeout(() => { if ($('#overlay').dataset.kind === `pond${e.id}`) closeModal(); }, 7000);
+  }
+  function confetti() {
+    if (!profile.motion) return;
+    const c = document.createElement('div'); c.className = 'confetti';
+    const cols = ['#FF6B8B', '#FFC94D', '#6CC17A', '#B69CFF', '#8FD3F4'];
+    c.innerHTML = Array.from({ length: 70 }, () => `<i style="left:${Math.random() * 100}%;background:${cols[Math.floor(Math.random() * cols.length)]};animation-delay:${Math.random() * 1.2}s;animation-duration:${2.4 + Math.random() * 1.6}s"></i>`).join('');
+    document.body.appendChild(c); setTimeout(() => c.remove(), 5000);
+  }
   function showGameOver() {
-    const g = S.game; if (!g || !g.over) return;
-    const o = g.over, me = S.me, host = S.hostId === me;
-    const won = o.winners.includes(me);
-    const reveal = g.houses.map((id) => {
+    const g = S.game; if (!g || !g.over) return closeModal();
+    const o = g.over, me = S.me, host = S.hostId === me, won = o.winners.includes(me);
+    if (won) confetti();
+    const reveal = g.houses.map((id, i) => {
       const r = ROLES[o.roles[id]];
-      return `<div class="reveal ${o.winners.includes(id) ? 'won' : ''}">${avatar(P(id), 'sm')}<div><b>${nm(id)}</b>${g.alive.includes(id) ? '' : ' ✨'}<br>${r.icon} ${r.name}${o.winners.includes(id) ? ' 🏆' : ''}</div></div>`;
+      return `<div class="reveal ${o.winners.includes(id) ? 'won' : ''}" style="animation-delay:${i * 0.07}s">${avatar(P(id), 'sm')}<div><b>${nm(id)}</b>${g.alive.includes(id) ? '' : ' 👻'}<br>
+        <span class="${r.team === 'sneaks' ? 'r-sneak' : ''}">${r.icon} ${r.name}</span>${o.winners.includes(id) ? ' 🏆' : ''}</div></div>`;
     }).join('');
     const recap = o.history.map((h) => {
       const items = h.visits.map((v) => {
-        const verb = { kill: '🌑 went after', check: '🦉 watched', protect: '🦔 protected', gossip: '🐇 watched', peek: 'peeked at' }[v.kind] || 'visited';
+        const verb = { kill: '🌑 went after', check: '🦉 watched', protect: '🦔 protected', gossip: '🐇 watched', peek: '👀 peeked at' }[v.kind] || 'visited';
         return `<li>${nm(v.from)} ${verb} ${nm(v.to)}${v.hidden ? ' (underground 🕳️)' : ''}</li>`;
       }).join('');
       const extra = (h.meddles || []).map((m) => `<li>🎭 ${nm(m.by)} meddled with ${nm(m.target)}</li>`).join('')
         + (h.lit || []).map((x) => `<li>🏮 A lantern glowed at ${nm(x)}'s house</li>`).join('');
-      return `<div class="recap-night"><b>Night ${h.night}</b>${h.kill ? ` · Sneaks targeted ${nm(h.kill)}${h.saved ? ' (saved!)' : ''}` : ''}
-<ul>${items || '<li>Nobody went out.</li>'}${extra}</ul></div>`;
+      return `<div class="recap-night"><b>Night ${h.night}</b>${h.kill ? ` · Sneaks targeted ${nm(h.kill)}${h.saved ? ' (saved! 🦔)' : ''}` : ''}<ul>${items || '<li>Nobody went out.</li>'}${extra}</ul></div>`;
     }).join('');
-    const m = modal(`<div class="gameover"><p class="winner">${o.winner === 'village' ? '🏡 The village wins!' : '🌑 The Sneaks win!'}</p>
-      <p style="text-align:center">${won ? 'You won this one. Nicely played!' : 'Not your win this time. Read the recap to see how it happened.'}</p>
+    const m = modal(`<div class="gameover"><p class="winner ${o.winner}">${o.winner === 'village' ? '🏡 Village wins!' : '🌑 Sneaks win!'}</p>
+      <span class="you-badge ${won ? '' : 'lost'}">${won ? '🎉 You won!' : '💤 Not your win this time'}</span>
       <h3>Who was who</h3><div class="reveal-grid">${reveal}</div>
-      <h3>What really happened</h3>${recap}
-      <div class="row" style="justify-content:center;margin-top:1rem">
-        ${host ? '<button class="btn primary" data-go="again">Play again</button>' : '<span class="muted">Waiting for the host to start a new round…</span>'}
-        <button class="btn" data-go="map">View the map</button><button class="btn ghost" data-go="leave">Leave</button></div></div>`, 'wide');
+      <details class="recap"><summary>📜 What really happened each night</summary>${recap}</details>
+      <div class="row" style="justify-content:center;margin-top:1.2rem">
+        ${host ? '<button class="btn primary big" data-go="again">Play again</button>' : '<span class="muted" style="font-weight:800">Waiting for the host to start a new round…</span>'}
+        <button class="btn" data-go="map">View the map</button><button class="btn" data-go="leave">Leave</button></div></div>`, 'wide', 'over');
     m.addEventListener('click', (e) => {
       const b = e.target.closest('[data-go]'); if (!b) return;
       if (b.dataset.go === 'again') send({ t: 'again' });
@@ -689,27 +848,18 @@
     });
   }
 
-  // ----- emotes -----
-  function floatEmote(id, e) {
-    const h = $(`.house[data-id="${id}"]`), layer = $('#floaters');
-    if (!h || !layer) return;
-    const f = document.createElement('div');
-    f.className = 'floater'; f.textContent = e;
-    f.style.left = h.style.left; f.style.top = h.style.top;
-    layer.appendChild(f); setTimeout(() => f.remove(), 1700);
-  }
-
-  // ----- ticker: timers, countdowns, coach hints -----
+  // ----- ticker: timer ring, countdowns, coach hints -----
   setInterval(() => {
     $$('[data-countdown]').forEach((el) => { const s = Math.max(0, Math.ceil((Number(el.dataset.countdown) - now()) / 1000)); el.textContent = `Starting in ${s}s`; });
     if (!S || !S.game) return;
-    const g = S.game, t = $('#timer');
-    if (g.phase === 'over' || !g.endsAt) { t.textContent = '—'; t.classList.remove('low'); return; }
-    const s = Math.max(0, Math.ceil((g.endsAt - now()) / 1000));
-    t.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-    t.classList.toggle('low', s <= 10);
+    const g = S.game, t = $('#timer'), wrap = t.parentElement, ring = $('#timer-ring');
+    if (g.phase === 'over' || !g.endsAt) { t.textContent = '—'; wrap.classList.remove('low'); ring.style.strokeDashoffset = 0; return; }
+    const ms = Math.max(0, g.endsAt - now()), s = Math.ceil(ms / 1000);
+    t.textContent = s >= 60 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : `${s}`;
+    wrap.classList.toggle('low', s <= 10);
+    ring.style.strokeDashoffset = 113.1 * (1 - Math.min(1, ms / (ui.phaseTotal || 1)));
     const meAlive = g.alive.includes(S.me);
-    if (g.phase === 'night' && meAlive && Date.now() - ui.phaseStart > 10000 && !g.mySneakVote && !g.myAction) hint(`night${g.day}`, 'tap a house on the map to use your ability.');
+    if (g.phase === 'night' && meAlive && Date.now() - ui.phaseStart > 9000 && !g.mySneakVote && !g.myAction) hint(`night${g.day}`, 'tap one of the glowing houses on the map to use your ability!');
   }, 250);
 
   buildHome();

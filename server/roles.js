@@ -17,9 +17,9 @@ const ROLES = {
 
 const isSneakTeam = (role) => ROLES[role] && ROLES[role].team === 'sneaks';
 
-function sneakCount(n) { if (n <= 6) return 1; if (n <= 12) return 2; return 3; }
+function sneakCount(n) { if (n <= 7) return 1; if (n <= 12) return 2; return 3; }
 function powerRange(n) {
-  const table = { 4: [1, 1], 5: [1, 1], 6: [1, 2], 7: [4, 4], 8: [4, 4], 9: [3, 4], 10: [3, 4], 11: [2, 3], 12: [1, 2], 13: [5, 6], 14: [4, 5] };
+  const table = { 4: [1, 1], 5: [1, 1], 6: [2, 2], 7: [1, 1], 8: [5, 5], 9: [4, 5], 10: [4, 5], 11: [3, 4], 12: [3, 3], 13: [6, 7], 14: [6, 6] };
   return table[n] || [5, 6];
 }
 function soloRange(n, spice) {
@@ -28,7 +28,7 @@ function soloRange(n, spice) {
   return [1, 1];
 }
 const POWER_POOLS = {
-  cozy:    { owl: 2, hedgehog: 2 },
+  cozy:    { owl: 3, hedgehog: 2 },
   classic: { owl: 2, hedgehog: 2, bunny: 1, turtle: 1, lantern: 1 },
   chaos:   { owl: 2, hedgehog: 2, bunny: 1, turtle: 1, lantern: 1 },
 };

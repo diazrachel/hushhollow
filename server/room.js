@@ -214,7 +214,7 @@ class Room {
       actions: {}, sneakVotes: {}, meddles: {}, owlPending: [], lastProtect: {}, lastLight: {}, lastMeddle: {},
       turtles: new Set(), ready: new Set(), noms: {}, nominees: [], votes: {}, defenseIdx: 0, history: [], deaths: [],
       chat: { day: [], den: [], wisp: [] }, ai: {}, soloWins: new Set(), winner: null, winnerIds: new Set(),
-      claimSeq: 1, bigGame: n >= 12,
+      settleLeft: n === 4 ? 2 : 1, claimSeq: 1, eventSeq: 1, events: [], bigGame: n >= 12,
     };
     this.players.forEach((p, i) => { g.roles[p.id] = roles[i]; g.priv[p.id] = []; g.notes[p.id] = []; });
     const team = order.filter((id) => isSneakTeam(g.roles[id]));
@@ -386,15 +386,19 @@ class Room {
         const others = shuffle(living.filter((x) => x !== id && x !== a.target));
         const extra = living.length >= 5 ? 2 : 1; // smaller groups in small games so the hint still narrows things down
         const group = [a.target, ...others.slice(0, extra)];
-        const yes = group.some((x) => isSneakTeam(g.roles[x]));
+        // Pick a TRUE statement about the group. When the group is mixed, either statement is true,
+        // so "is not a Sneak" never proves the group is clean.
+        const hasSneak = group.some((x) => isSneakTeam(g.roles[x]));
+        const hasOther = group.some((x) => !isSneakTeam(g.roles[x]));
+        const yes = hasSneak && (!hasOther || Math.random() < 0.8);
         let shown = group.slice();
         if (scrambled && shown.length > 1) {
           const spare = others.slice(extra);
           if (spare.length) shown[1 + Math.floor(Math.random() * (shown.length - 1))] = pick(spare);
         }
         const names = listNames(shown.map((x) => this.name(x)));
-        const text = `Night ${night}: you watched ${tn}. ${yes ? `At least one of ${names} is a Sneak.` : `None of ${names} is a Sneak.`}`;
-        if (g.n === 5 || g.n === 6) { g.owlPending.push({ to: id, text, hint: { group: shown, yes }, at: night + 1 }); this.priv(id, `Night ${night}: you watched ${tn}. In a small village the answer takes a night to arrive.`); }
+        const text = `Night ${night}: you watched ${tn}. ${yes ? `At least one of ${names} is a Sneak.` : `At least one of ${names} is NOT a Sneak.`}`;
+        if (g.n <= 7) { g.owlPending.push({ to: id, text, hint: { group: shown, yes }, at: night + 1 }); this.priv(id, `Night ${night}: you watched ${tn}. In a small village the answer takes a night to arrive.`); }
         else this.priv(id, text, { hint: { group: shown, yes } });
       } else if (a.kind === 'peek') {
         let c = visitorsTo(a.target, id).length;
@@ -424,6 +428,7 @@ class Room {
 
     // Deaths
     for (const id of died) this.kill(id, 'night');
+    g.events.push({ id: g.eventSeq++, type: 'dawn', night, died, saved: rec.saved, lit: [...g.litNext] });
 
     rec.visits = visits;
     g.history.push(rec);
@@ -431,7 +436,8 @@ class Room {
     else if (rec.saved) this.log('Dawn. Everyone is safe. Someone was protected in the night!');
     else this.log('Dawn. Everyone woke up safe.');
     if (g.litNext.size) this.log(`A lantern was hung at ${[...g.litNext].map((x) => `${this.name(x)}'s house`).join(' and ')}. It glows tonight.`);
-    g.settling = false;
+    g.settleLeft = (g.settleLeft || 1) - 1;
+    g.settling = g.settleLeft > 0;
     if (this.checkWin()) return;
     this.setPhase('dawn', BASE.dawn * this.mult(), () => this.startDay());
   }
@@ -484,6 +490,7 @@ class Room {
     const sorted = Object.entries(tally).sort((a, b) => b[1] - a[1]);
     let out = null;
     if (sorted.length && sorted[0][1] > skip && (sorted.length === 1 || sorted[0][1] > sorted[1][1])) out = sorted[0][0];
+    g.events.push({ id: g.eventSeq++, type: 'pond', day: g.day, out, tally, skip });
     if (out) {
       this.log(`The village sends ${this.name(out)} into the Pond. Splash! Their notepad was left behind.`);
       this.kill(out, 'pond');
@@ -530,7 +537,7 @@ class Room {
     if (m.kind === 'role') { if (!ROLES[m.role]) return; c.role = m.role; }
     else if (m.kind === 'hint') {
       const t = [...new Set(Array.isArray(m.targets) ? m.targets : [])].filter((x) => this.get(x) && x !== p.id).slice(0, 3);
-      if (!t.length || !['sneak', 'clear'].includes(m.result)) return;
+      if (!t.length || !['sneak', 'not'].includes(m.result)) return;
       c.targets = t; c.result = m.result;
     } else if (m.kind === 'saw') {
       if (!this.get(m.target) || !this.get(m.at) || m.target === m.at) return;
@@ -621,7 +628,7 @@ class Room {
       log: g.log.slice(-100),
       deaths: g.deaths.map((d) => ({ ...d, notes: g.notes[d.id] })),
       claims: g.claims, yarn: g.yarn, noms: g.noms, nominees: g.nominees, defenseIdx: g.defenseIdx,
-      votes: g.votes, readyCount: g.ready.size, turtles: [...g.turtles],
+      votes: g.votes, readyCount: g.ready.size, turtles: [...g.turtles], events: g.events.slice(-6),
       myRole: role, myLog: g.priv[pid] || [], myNotes: g.notes[pid] || [],
       myAction: g.actions[pid] || null, mySneakVote: g.sneakVotes[pid] || null,
       iReady: g.ready.has(pid), lastProtect: g.lastProtect[pid] || null, lastLight: g.lastLight[pid] || null,
