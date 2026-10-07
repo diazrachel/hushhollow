@@ -67,23 +67,25 @@ The server owns every secret. Clients send intents ("I visit house 4") and only 
 
 | Role | Team | Ability |
 |---|---|---|
-| Villager | Village | Peek at a house: learn how many others visited it |
-| Owl | Village | Watch a critter: get one true fuzzy hint about them + 2 random others ("at least one is a Sneak" or "at least one is NOT a Sneak") |
+| Villager | Village | No ability: a voice and a vote. Always the most common role |
+| Owl | Village | Watch a critter: get one true fuzzy hint about them + 2 random others. 1 per game (2 at 13+ players) |
 | Hedgehog | Village | Protect a critter from the Sneaks (not the same one twice in a row) |
 | Gossip Bunny | Village | Watch a house: learn who visited, but not why |
 | Elder Turtle | Village | Reveal once during the day for a double vote |
 | Lantern Keeper | Village | Light a house for the next night; Sneaks can't reach it |
 | Sneak | Sneaks | Vote with the team on who to spirit away |
 | Trickster | Sneaks | Also meddles with one critter a night, slightly scrambling their info |
-| Shadow Mole | Sneaks | Invisible to peeks and the Bunny; lets the team tunnel under lanterns |
+| Shadow Mole | Sneaks | Invisible to the Bunny; lets the team tunnel under lanterns |
 | Pond Frog | Solo | Wins if voted into the Pond |
 | Wandering Moth | Solo | Wins if alive at the end |
 
-Spice levels: **Cozy** (Owl, Hedgehog, Villager, Sneak), **Classic** (+ Bunny, Turtle, Lantern Keeper, Trickster), **Chaos** (+ Mole and solo roles).
+Up to 3 Sneaks, each a different type picked at random. Every role except Villager and Owl appears at most once per game.
+
+Spice levels: **Cozy** (Owl, Hedgehog, Gossip Bunny), **Classic** (+ Elder Turtle, Lantern Keeper), **Chaos** (+ solo roles).
 
 ## Tuning balance
 
-Setups per player count live in `server/roles.js` (`sneakCount` and `powerRange`). They were tuned with thousands of simulated AI games, aiming for the village to win 45–55% of the time. Real human games will play differently, so adjust as you collect results.
+Setups per player count live in `server/roles.js` (`sneakCount`, `owlCount`, and `extraPowerRange`). They were tuned with thousands of simulated AI games, aiming for the village to win 45–55% of the time. Real human games will play differently, so adjust as you collect results.
 
 To run the game fast for testing: `SPEED_MULT=0.2 npm start` makes every timer 5× shorter.
 
