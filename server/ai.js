@@ -99,47 +99,35 @@ function suspicion(room, p) {
     if (set.size > limit) set.forEach((id) => add(id, cleared.has(id) ? 0 : 4));
     if (!sneak && r === g.roles[me] && ['bunny', 'turtle', 'lantern'].includes(r)) set.forEach((id) => add(id, 10));
   }
-  // ---- Night walks, alibis and crime scenes ----
-  const { walks: walks0 } = intel(g, me); const walks = walks0;
-  const myWalk = (night) => walks.find((w) => w.night === night);
+  // ---- Lantern Night: what I saw with my own lantern, where the Sneak struck, the tracks ----
+  const myPriv = g.priv[me] || [];
+  const sights = myPriv.filter((e) => e.sight).map((e) => e.sight);
+  for (const e of myPriv) if (e.witness && e.witness.by in s) add(e.witness.by, 100);
   const claimedAt = (id, night) => { const c = [...g.claims].reverse().find((x) => x.kind === 'at' && x.by === id && x.night === night); return c ? c.place : null; };
-  for (const w of walks) {
-    // Alibi checks: someone says they were where I was, but I didn't see anyone like them
-    for (const id of others) {
-      const said = claimedAt(id, w.night);
-      const sawClearly = w.seen.some((x) => x.id === id);
-      if (said === w.place) {
-        if (sawClearly) add(id, -1.2);
-        else if (!w.seen.some((x) => !x.id && looksLike(room, id, x))) add(id, 4); // lied about being there
-      } else if (said && sawClearly) add(id, 4); // I saw them somewhere else
-    }
-    // Someone slipped away from my spot
-    if (w.slip) for (const id of others) {
-      if (w.seen.some((x) => x.id === id)) add(id, 3);
-      else if (w.seen.some((x) => !x.id && looksLike(room, id, x))) add(id, 1.2);
-      if (claimedAt(id, w.night) === w.place) add(id, 1.5);
-    }
-  }
   for (const sc of g.scenes || []) {
-    const f = sc.facts || {};
-    for (const id of others) {
-      const q = room.get(id); if (!q) continue;
-      if (f.size && SIZE[q.critter] === f.size) add(id, 1);
-      if (f.size && SIZE[q.critter] !== f.size) add(id, -0.6);
-      if (f.sizeNot) add(id, SIZE[q.critter] === f.sizeNot ? -0.6 : 0.4);
-      if (f.color && FUR[q.color] === f.color) add(id, 2.5);
-      if (f.from) {
-        const said = claimedAt(id, sc.night), w = myWalk(sc.night);
-        if (f.from === 'home') { if (said === 'home') add(id, 1.5); else if (!said) add(id, 0.4); }
-        else {
-          if (said === f.from) add(id, 2);
-          if (w && w.place === f.from) {
-            if (w.seen.some((x) => x.id === id)) add(id, 2.5);
-            else if (w.seen.some((x) => !x.id && looksLike(room, id, x))) add(id, 1);
-          }
-        }
-      }
+    const mine = sights.find((x) => x.night === sc.night);
+    if (mine) for (const sg of mine.seen) {
+      if (!(sg.id in s)) continue;
+      const around = sg.pts.filter((pt) => Math.abs(pt[0] - sc.t) <= 7);
+      if (!around.length) continue;
+      const dmin = Math.min(...around.map((pt) => Math.hypot(pt[1] - sc.x, pt[2] - sc.y)));
+      if (dmin <= 10) add(sg.id, 3); else if (dmin >= 28) add(sg.id, -3); // near the scene / a solid alibi
+      // sneaking around in the dark right before it happened
+      if (sg.pts.some((pt) => pt[3] === 0 && pt[0] <= sc.t + 2 && pt[0] >= sc.t - 20)) add(sg.id, 4);
     }
+    // footprint shapes near the scene, around the time it happened
+    const tr = ((g.trackLog || {})[sc.night] || []).filter((f) => Math.hypot(f.x - sc.x, f.y - sc.y) <= 7 && Math.abs(f.t - sc.t) <= 9);
+    const sizes = new Set(tr.map((f) => f.s));
+    if (sizes.size && !sc.mole) for (const id of others) { const q = room.get(id); if (q) add(id, sizes.has(SIZE[q.critter]) ? 0.8 : -0.4); }
+  }
+  for (const sg of sights) for (const x of sg.seen) if (x.dark && x.id in s) add(x.id, 2); // why was their lantern off?
+  // Alibis people SAID vs. where I actually saw them
+  for (const sg of sights) for (const x of sg.seen) {
+    const said = claimedAt(x.id, sg.night);
+    if (!said || !(x.id in s)) continue;
+    const pl = said === 'home' ? null : PLACES[said];
+    const matched = pl ? (x.zone || '').includes(pl.name) : /house/.test(x.zone || '');
+    add(x.id, matched ? -1 : 1.5);
   }
   for (const c of g.claims) {
     if (c.kind !== 'seenAt' || c.by === me) continue;
@@ -168,70 +156,51 @@ function suspicion(room, p) {
 }
 
 // ---------------- night ----------------
-function night(room, p) {
-  const g = room.game, me = p.id;
-  if (!g.alive.has(me) || g.phase !== 'night') return;
-  const role = g.roles[me], level = p.aiLevel;
+// Decide tonight's targets (the bot then walks there): an ability target, a Sneak target, a Trickster target
+function nightPlan(room, p) {
+  const g = room.game, me = p.id, role = g.roles[me], level = p.aiLevel;
+  const out = { ability: null, strike: null, meddle: null };
   const others = [...g.alive].filter((id) => id !== me);
-  if (!others.length) return;
-  const send = (target, extra = {}) => target && room.act(me, { t: 'night', target, ...extra });
-  if (!(me in g.walks)) {
-    const home = level === 'sleepy' ? 0.25 : isSneakTeam(role) ? 0.15 : 0.08;
-    room.act(me, { t: 'night', kind: 'walk', place: Math.random() < home ? 'home' : pick(g.places) });
-  }
+  if (!others.length) return out;
   const claimedPower = (id) => g.claims.some((c) => c.by === id && ((c.kind === 'role' && c.role !== 'villager') || c.kind === 'hint' || c.kind === 'saw'));
-
-  if (isSneakTeam(role) && !g.settling) {
-    const mole = [...g.alive].some((id) => g.roles[id] === 'mole');
-    const cands = others.filter((id) => !isSneakTeam(g.roles[id]) && (!g.lit.has(id) || mole));
+  if (isSneakTeam(role)) {
+    if (g.settling) return out;
+    const cands = others.filter((id) => !isSneakTeam(g.roles[id]));
     if (cands.length) {
-      let t;
-      if (level === 'sleepy') t = pick(cands);
+      if (level === 'sleepy') out.strike = pick(cands);
       else {
-        const teamPicks = Object.values(g.sneakVotes).filter((x) => cands.includes(x));
-        if (teamPicks.length && Math.random() < 0.75) t = pick(teamPicks);
-        else {
-          const score = {};
-          cands.forEach((id) => {
-            score[id] = Math.random() * 2 + (g.turtles.has(id) ? 3 : 0) + (claimedPower(id) ? 5 : 0);
-            if (accusedBy(g, id).length) score[id] -= 1; // let the village waste a vote on them
-            for (const c of g.claims) if (c.by === id && c.kind === 'accuse' && isSneakTeam(g.roles[c.target])) score[id] += 4;
-          });
-          t = top(score);
-        }
+        const score = {};
+        cands.forEach((id) => {
+          score[id] = Math.random() * 2 + (g.turtles.has(id) ? 3 : 0) + (claimedPower(id) ? 5 : 0);
+          if (accusedBy(g, id).length) score[id] -= 1; // let the village waste a vote on them
+          for (const c of g.claims) if (c.by === id && c.kind === 'accuse' && isSneakTeam(g.roles[c.target])) score[id] += 4;
+        });
+        out.strike = top(score);
       }
-      send(t);
-      const team = [...g.alive].filter((id) => isSneakTeam(g.roles[id]));
-      if (t && team.length > 1 && level !== 'sleepy' && Math.random() < 0.6) setTimeout(() => {
-        if (room.game === g && g.phase === 'night' && g.alive.has(me)) say(room, p, 'den', { t: room.name(t) }, 'den');
-      }, 400 + Math.random() * 1500);
     }
     if (role === 'trickster' && level !== 'sleepy') {
       const pool = others.filter((id) => id !== g.lastMeddle[me] && !isSneakTeam(g.roles[id]));
       const info = pool.filter((id) => claimedPower(id));
-      const target = pick(info.length ? info : pool);
-      if (target && Math.random() < 0.8) room.act(me, { t: 'night', kind: 'meddle', target });
+      if (Math.random() < 0.8) out.meddle = pick(info.length ? info : pool) || null;
     }
-    return;
+    return out;
   }
-
-  if (isSneakTeam(role)) return; // quiet night
   const kind = ROLES[role].night;
-  if (!kind) return; // Villagers and other no-ability roles sleep
-  const legal = others.filter((id) => !(kind === 'protect' && id === g.lastProtect[me]) && !(kind === 'light' && id === g.lastLight[me]));
-  if (level === 'sleepy') return send(pick(legal.length ? legal : others));
+  if (!kind) return out;
+  const legal = others.filter((id) => !(kind === 'protect' && id === g.lastProtect[me]));
+  if (level === 'sleepy') { out.ability = pick(legal.length ? legal : others); return out; }
   const s = suspicion(room, p);
   const victimScore = (pool) => {
     const sc = {};
     pool.forEach((id) => { sc[id] = Math.random() * 2 - Math.max(0, s[id] || 0) * 0.3 + (claimedPower(id) ? 4 : 0) + (g.turtles.has(id) ? 2 : 0); });
     return top(sc);
   };
-  let t;
-  if (kind === 'check') t = top(s, (id) => legal.includes(id) && s[id] > -5) || pick(legal);
-  else if (kind === 'protect' || kind === 'light') t = victimScore(legal);
-  else if (kind === 'gossip') t = Math.random() < 0.65 ? victimScore(legal) : top(s);
-  else t = Math.random() < 0.5 ? top(s) : pick(legal);
-  send(t || pick(legal));
+  if (kind === 'check') out.ability = top(s, (id) => legal.includes(id) && s[id] > -5) || pick(legal);
+  else if (kind === 'protect' || kind === 'light') out.ability = victimScore(legal);
+  else if (kind === 'gossip') out.ability = Math.random() < 0.65 ? victimScore(legal) : top(s);
+  else out.ability = Math.random() < 0.5 ? top(s) : pick(legal);
+  if (!out.ability) out.ability = pick(legal);
+  return out;
 }
 
 // ---------------- notepad ----------------
@@ -276,30 +245,23 @@ function pin(room, me, sticker, text, tags) { room.act(me, { t: 'post', sticker,
 // What this critter says about its night walk. Village critters tell the truth;
 // a Sneak who did the deed lies if the crime scene points at where they really were.
 function alibiLine(room, p) {
-  const g = room.game, me = p.id, sneak = isSneakTeam(g.roles[me]);
-  const night = g.day;
-  const w = intel(g, me).walks.find((x) => x.night === night);
-  const rec = g.history.find((h) => h.night === night) || {};
+  const g = room.game, me = p.id, sneak = isSneakTeam(g.roles[me]), night = g.day;
+  const sg = (g.priv[me] || []).filter((e) => e.sight && e.sight.night === night).pop();
   const sc = (g.scenes || []).find((x) => x.night === night);
-  let place = w ? w.place : (rec.walks && rec.walks[me]) || 'home';
-  let seen = w ? w.seen : [];
-  let slip = w ? w.slip : false;
-  if (sneak && rec.culprit === me && sc && sc.facts && sc.facts.from === place) {
-    // cover story: "home" can't be checked by anyone, so it's the safer lie
-    place = Math.random() < (p.aiLevel === 'cunning' ? 0.8 : 0.6) ? 'home' : pick(g.places.filter((x) => x !== place)); seen = []; slip = false;
+  const rec = g.history.find((h) => h.night === night) || {};
+  let zones = sg ? sg.sight.zones.slice(0, 2) : [];
+  let seen = sg ? sg.sight.seen : [];
+  if (sneak && rec.culprit === me && sc) {
+    // cover story: leave out the scene and anyone who might place me there
+    zones = zones.filter((z) => z !== sc.zone).slice(0, 1);
+    if (!zones.length) zones = [`the ${pick(g.world.landmarks).name}`];
+    seen = seen.filter((x) => x.id !== sc.victim && x.zone !== sc.zone);
   }
-  if (sneak && rec.culprit === me && sc && sc.facts && sc.facts.from === 'home' && place === 'home' && p.aiLevel !== 'sleepy') {
-    // pick the spot fewest critters admitted to visiting
-    const counts = {}; g.places.forEach((x) => { counts[x] = 0; });
-    g.claims.filter((c) => c.kind === 'at' && c.night === night && counts[c.place] !== undefined).forEach((c) => { counts[c.place]++; });
-    place = Object.entries(counts).sort((x, y) => x[1] - y[1])[0][0];
-  }
-  const M = mem(g, me); M.alibi = M.alibi || {}; M.alibi[night] = place;
-  if (place === 'home') return pick(['I stayed home last night 🏠', 'I was home all night, honestly.', 'stayed home last night, too spooky out 😬']);
-  const pl = PLACES[place];
-  const who = seen.map((x) => (x.id ? room.name(x.id) : x.size ? `a ${x.size} critter` : `someone with ${x.color} fur`));
+  const M = mem(g, me); M.alibi = M.alibi || {}; M.alibi[night] = zones[0] || 'home';
+  if (!zones.length) return pick(['I stayed close to home last night 🏠', 'I was home most of the night, honestly.']);
+  const who = seen.map((x) => room.name(x.id));
   const list = who.length < 2 ? who.join('') : `${who.slice(0, -1).join(', ')} and ${who[who.length - 1]}`;
-  return `I was at the ${pl.name} ${pl.e} last night. ${who.length ? `saw ${list}.` : 'nobody else was there.'}${slip ? ' and someone slipped away partway through 👀' : ''}`;
+  return `I was around ${zones.join(' and ')} last night. ${who.length ? `crossed paths with ${list}.` : "didn't run into anyone."}`;
 }
 
 function dayTalk(room, p) {
@@ -433,4 +395,4 @@ function vote(room, p) {
   if (Math.random() < 0.35) say(room, p, t && t !== 'skip' ? 'vote' : 'skip', { t: t && t !== 'skip' ? room.name(t) : '' });
 }
 
-module.exports = { night, notes, dayTalk, dayLate, ready, vote, suspicion, mem, alibiLine };
+module.exports = { nightPlan, notes, dayTalk, dayLate, ready, vote, suspicion, mem, alibiLine };

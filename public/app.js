@@ -53,6 +53,7 @@
     else if (m.t === 'home') { S = null; showScreen('home'); urlJoin(); }
     else if (m.t === 'error') toast(m.text);
     else if (m.t === 'kicked') { toast('The host removed you from the burrow.'); S = null; showScreen('home'); }
+    else if (m.t === 'nf') { if (window.HHNight) window.HHNight.onFrame(m); }
     else if (m.t === 'emote') floatEmote(m.id, m.e);
     else if (m.t === 'typing') showTyping(m.id);
     else if (m.t === 'gameover') { profile.games = (profile.games || 0) + 1; store.set('hh-profile', profile); sound('win'); }
@@ -75,7 +76,9 @@
   }
   const now = () => Date.now() + offset;
   function showScreen(id) {
+    const was = ['home', 'lobby', 'game'].find((s) => !$(`#${s}`).classList.contains('hidden'));
     ['home', 'lobby', 'game'].forEach((s) => $(`#${s}`).classList.toggle('hidden', s !== id));
+    if (was !== id) window.scrollTo(0, 0);
     if (id === 'home') setPhaseClass('home');
     if (id !== 'lobby') ui.built.lobby = false;
   }
@@ -349,7 +352,7 @@
       if (g.phase === 'night') sound('night'); else if (g.phase === 'dawn') sound('chime'); else if (g.phase === 'vote') sound('pop');
       const alive = g.alive.includes(S.me);
       if (!alive && ui.chatCh !== 'wisp') ui.chatCh = 'wisp';
-      if (g.phase === 'night' && alive) hint(`walk${g.day}`, 'pick a spot for your night walk. Who you bump into could crack the case!');
+      if (g.phase === 'night' && alive) hint(`walk${g.day}`, 'walk with WASD / arrows (or press and drag). Hold E by a lamp to light it. Notice who you meet!');
       if (g.phase === 'day') hint(`day${g.day}`, 'talk it out in Chat or pin a note on the Board. You decide how much to reveal!');
       if (g.phase === 'vote') hint('vote', "tap a house to vote, or Skip if you're unsure.");
     }
@@ -371,7 +374,7 @@
     $('#emote-bar').onclick = (e) => { const b = e.target.closest('[data-emote]'); if (b) send({ t: 'emote', e: b.dataset.emote }); };
     $('#map').innerHTML = `<div class="path-ring"></div><svg class="yarn" viewBox="0 0 100 100" preserveAspectRatio="none" id="yarn"></svg>
       <div class="pond" id="pond"><span class="lily" style="left:14%;top:30%">🪷</span><span class="lily" style="right:16%;bottom:22%">🍃</span><span class="pond-icon" id="pond-icon">🌙</span></div>
-      <div id="signs"></div><div id="houses"></div><div id="floaters"></div>`;
+      <canvas id="tracks-canvas" class="tracks-canvas"></canvas><div id="houses"></div><div id="floaters"></div>`;
     $('#map').onclick = (e) => {
       const sp = e.target.closest('.signpost');
       if (sp) {
@@ -392,6 +395,9 @@
       const q = b.dataset.ask;
       send({ t: 'chat', text: who ? `${who}, ${q}` : q.charAt(0).toUpperCase() + q.slice(1), channel: ui.chatCh });
     };
+    $('#tracks-toggle').onclick = () => { ui.showTracks = ui.showTracks === false; renderTracks(); };
+    $('#tracks-time').oninput = () => { ui.showTracks = true; renderTracks(); };
+    window.addEventListener('resize', () => { if (S && S.game && S.game.phase !== 'night') renderTracks(); });
     $('#role-chip').onclick = () => queueModal(() => showRoleReveal(true));
     $('#g-handbook-btn').onclick = () => openHandbook();
     $('#g-theme-btn').onclick = toggleTheme; applyTheme();
@@ -433,9 +439,8 @@
     const picked = g.mySneakVote || (g.myAction && g.myAction.target);
     const map = {
       night: ['🌙', g.settling ? 'Quiet night' : `Night ${g.day}`,
-        !meAlive ? "You're a Wisp: read every chat, even the Den" : !g.myWalk ? '🚶 Pick a spot for your night walk'
-          : picked || !hasNight(g) ? '✓ Done! Waiting for morning…'
-          : onTeam && !g.settling ? 'Pick who to spirit away' : `${r.verb}: tap a glowing house`],
+        !meAlive ? 'You\'re a Wisp: watch the whole village' : onTeam && !g.settling ? (g.attempted ? 'Slip away and relight your lantern' : 'Go dark (Q) and strike (hold E)')
+          : 'Walk the village with your lantern 🏮'],
       dawn: ['🌅', 'Morning', 'Read the morning report'],
       day: ['☀️', `Day ${g.day}`, !meAlive ? 'Wisps watch from the mist' : g.bigGame ? 'Nominate a suspect, then press Ready' : 'Talk it out, then press Ready'],
       defense: ['🎤', 'Defense', `Listen to ${P(g.nominees[g.defenseIdx])?.name || 'the nominee'}`],
@@ -468,7 +473,33 @@
     $('#role-chip').textContent = `${r.icon} ${r.name}`;
     $('#role-chip').className = `role-chip ${teamClass(r.team)}`;
     $('#pond-icon').textContent = { night: '🌙', dawn: '🌅', day: '☀️', defense: '🎤', vote: '🗳️', over: '🏆' }[g.phase] || '🌙';
-    renderMap(); renderAction(); renderSecrets(); renderTabs();
+    const isNight = g.phase === 'night';
+    $('#night-wrap').classList.toggle('hidden', !isNight);
+    $('#map').classList.toggle('hidden', isNight);
+    $('#emote-bar').classList.toggle('hidden', isNight);
+    if (isNight && window.HHNight && !window.HHNight.running()) setTimeout(() => {
+      const r = $('#night-wrap').getBoundingClientRect();
+      if (r.top < 0 || r.bottom > innerHeight) $('#night-wrap').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 60);
+    if (isNight && window.HHNight) window.HHNight.start({ send, game: () => S && S.game, P, me: () => S.me, role: (r) => ROLES[r] });
+    else if (window.HHNight) window.HHNight.stop();
+    renderMap(); renderAction(); renderSecrets(); renderTabs(); renderTracks();
+  }
+  // Footprints from last night, drawn over the day map, with a replay slider
+  function renderTracks() {
+    const g = S.game, bar = $('#tracks-bar');
+    const has = g.phase !== 'night' && (g.tracks || []).length > 0;
+    bar.classList.toggle('hidden', !has);
+    const cv = $('#tracks-canvas'); if (!cv) return;
+    const show = has && ui.showTracks !== false;
+    cv.classList.toggle('hidden', !show);
+    $('#tracks-toggle').classList.toggle('on', show);
+    const r = $('#tracks-time'); r.max = Math.round(g.nightDur || 70);
+    if (ui.tracksKey !== `${S.code}-${g.day}`) { ui.tracksKey = `${S.code}-${g.day}`; r.value = r.max; }
+    const v = Number(r.value), full = v >= Number(r.max);
+    const dur = Number(r.max) || 70;
+    $('#tracks-label').textContent = full ? 'All night' : v < dur / 3 ? `Early (${v}s)` : v < (2 * dur) / 3 ? `Around midnight (${v}s)` : `Late (${v}s)`;
+    if (show) requestAnimationFrame(() => window.HHNight.drawTracks(cv, g, full ? null : v));
   }
 
   function housePos(i, n) {
@@ -504,14 +535,7 @@
       ].join('');
       return `<button class="${cls}" data-id="${id}" style="left:${x}%;top:${y}%" aria-label="${esc(p.name)}${alive.has(id) ? '' : ' (Wisp)'}">
         ${voteCount[id] ? `<span class="votes">${voteCount[id]}</span>` : ''}<span class="badges">${badges}</span>
-        ${cottage(p)}<span class="critter">${avatar(p)}</span><span class="nameplate">${esc(p.name)}${id === me ? ' (you)' : ''}</span></button>`;
-    }).join(''));
-    const np = g.places.length;
-    setHTML($('#signs'), g.places.map((pl, i) => {
-      const a = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / np, x = 50 + 22.5 * Math.cos(a), y = 50 + 22.5 * Math.sin(a);
-      const canWalk = g.phase === 'night' && meAlive;
-      return `<button class="signpost ${g.myWalk === pl.id ? 'on' : ''} ${canWalk ? 'can' : ''}" data-place="${pl.id}" style="left:${x}%;top:${y}%" title="${canWalk ? `Walk to the ${pl.name}` : pl.name}">
-        <span class="se">${pl.e}</span><span class="sn">${pl.name}</span>${g.myWalk === pl.id ? '<span class="you">you</span>' : ''}</button>`;
+        ${cottage(p)}<span class="critter sz-${(CRITTERS[p.critter] || {}).size || 'medium'}">${avatar(p)}</span><span class="nameplate">${esc(p.name)}${id === me ? ' (you)' : ''}</span></button>`;
     }).join(''));
     setHTML($('#yarn'), Object.entries(g.yarn || {}).filter(([a, b]) => pos[a] && pos[b])
       .map(([a, b]) => `<line class="${a === me ? 'mine' : ''}" x1="${pos[a][0]}" y1="${pos[a][1]}" x2="${pos[b][0]}" y2="${pos[b][1]}"/>`).join(''));
@@ -577,29 +601,22 @@
     let label = '', text = '', who = null, done = false, actions = '';
     if (g.phase === 'night') {
       label = 'Tonight';
-      if (!meAlive) text = "You're a Wisp. Open Chat to read the Sneaks' Den and talk with other Wisps.";
-      else if (onTeam && !g.settling) {
-        who = g.mySneakVote; done = !!who;
-        text = who ? 'You picked:' : 'Tap a house to choose who to spirit away.';
-        if (team.length > 1) actions += `<p class="small" style="margin:.4rem 0 0"><b>Team picks:</b> ${Object.entries(g.teamVotes || {}).map(([a, b]) => `${nm(a)} → ${nm(b)}`).join(', ') || 'none yet'}. Agree in the Den chat.</p>`;
-        if (g.lit.length) actions += `<p class="small muted" style="margin:.3rem 0 0">${g.moleAlive ? '🕳️ Your Mole can tunnel under lanterns.' : '🏮 Lantern-lit houses are off limits tonight.'}</p>`;
-      } else {
-        who = g.myAction && g.myAction.target; done = !!who;
-        text = who ? 'You chose:' : g.settling && onTeam ? 'Quiet night: nobody vanishes. Rest up and plan with your team in the Den.'
-          : !hasNight(g) ? 'No special ability, but your night walk 👇 could crack the case.' : `${r.verb}: tap a house on the map.`;
-        if (g.myRole === 'hedgehog' && g.lastProtect) actions += `<p class="small muted" style="margin:.3rem 0 0">Can't protect ${nm(g.lastProtect)} twice in a row.</p>`;
-        if (g.myRole === 'lantern' && g.lastLight) actions += `<p class="small muted" style="margin:.3rem 0 0">Can't light ${nm(g.lastLight)}'s house twice in a row.</p>`;
-      }
-      if (meAlive) {
-        const walkBtn = (id, label) => `<button class="walk-btn ${g.myWalk === id ? 'on' : ''}" data-a="walk" data-place="${id}">${label}</button>`;
-        actions += `<div class="walk-box"><div class="task-label">🚶 Night walk ${g.myWalk ? '✓' : ''}</div>
-          <div class="walk-grid">${g.places.map((pl) => walkBtn(pl.id, `${pl.e} ${pl.name}`)).join('')}${walkBtn('home', '🏠 Stay home')}</div>
-          <p class="small muted" style="margin:.35rem 0 0">${onTeam && !g.settling ? 'Your alibi! Whoever goes out to strike might be noticed slipping away.' : "See who's out. Whoever you bump into could be a Sneak, or your alibi."}</p></div>`;
-        if (!g.myWalk) done = false; else if (!hasNight(g)) done = true;
-      }
-      if (meAlive && g.myRole === 'trickster') {
-        const opts = g.alive.filter((id) => id !== S.me && id !== g.lastMeddle).map((id) => `<option value="${id}" ${g.myMeddle === id ? 'selected' : ''}>${nm(id)}</option>`).join('');
-        actions += `<label class="field" style="margin-top:.6rem">🎭 Meddle with someone's night<select id="meddle-sel"><option value="">Nobody tonight</option>${opts}</select></label>`;
+      if (!meAlive) text = "You're a Wisp. Tonight you can see the whole village, every critter, every lantern. Watch closely!";
+      else {
+        const steps = [];
+        if (onTeam && !g.settling) {
+          steps.push(g.attempted ? '✓ The deed is done. Get away and light your lantern.' : 'Find a critter alone in the dark.', 'Snuff your lantern (<b>Q</b>) so nobody can see you.', 'Get close and <b>hold E</b>. Not inside lamplight!');
+          if (team.length > 1) steps.push(`Plan in the 🌑 Den. Name a target and AI teammates go after them.`);
+          done = !!g.attempted;
+        } else if (onTeam) steps.push('Quiet night: nobody vanishes. Walk around and look normal.', 'Scout who goes where. Plan in the 🌑 Den.');
+        else if (hasNight(g)) {
+          who = g.myAction && g.myAction.target; done = !!who;
+          steps.push(who ? `✓ Done: ${r.verb.split(' ')[0].toLowerCase()} ${nm(who)}` : `Walk to someone's door and <b>hold E</b> to ${r.verb.split(' ')[0].toLowerCase()} them.`);
+          if (g.myRole === 'hedgehog' && g.lastProtect) steps.push(`Can't protect ${nm(g.lastProtect)} twice in a row.`);
+        }
+        if (!onTeam || g.settling) steps.push('Light street lamps (<b>hold E</b> by a lamp). Sneaks can\'t strike in lamplight.', 'Notice who you meet, and where. Lanterns going dark are suspicious 👀');
+        if (g.myRole === 'trickster' && !g.settling) steps.push(g.myMeddle ? `✓ Meddled with ${nm(g.myMeddle)}` : '🎭 Hold E at a door to meddle with that critter\'s night.');
+        text = `<ol>${steps.map((x) => `<li>${x}</li>`).join('')}</ol>`;
       }
     } else if (g.phase === 'dawn') { label = 'Morning'; text = 'Check the morning report and what you learned last night.'; }
     else if (g.phase === 'day') {
@@ -767,7 +784,7 @@
   function renderBehind() {
     const g = S.game;
     setHTML($('#tab-behind'), [...g.deaths].reverse().map((d) => `<div class="behind"><div class="row">${avatar(P(d.id), 'sm')}<b>${nm(d.id)}</b>
-      <span class="small muted">${d.how === 'pond' ? `💦 voted into the Pond, day ${d.day}` : `🌙 vanished on night ${d.day}`}</span></div>${(() => { const sc = (g.scenes || []).find((x) => x.victim === d.id); return sc ? `<div class="scene-box small"><b>🔍 At the scene</b><ul>${sc.clues.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></div>` : ''; })()}${notesHTML(d.notes)}</div>`).join('')
+      <span class="small muted">${d.how === 'pond' ? `💦 voted into the Pond, day ${d.day}` : `🌙 vanished on night ${d.day}`}</span></div>${(() => { const sc = (g.scenes || []).find((x) => x.victim === d.id); return sc ? `<div class="scene-box small">📍 Vanished near <b>${esc(sc.zone)}</b>${sc.mole ? ' (no footprints, just dirt 🕳️)' : ''}</div>` : ''; })()}${notesHTML(d.notes)}</div>`).join('')
       || '<div class="empty-hint"><span class="big">👻</span>Nobody is gone yet. When a critter is eliminated, their role stays secret but their notepad shows up here.</div>');
   }
   function renderLog() {
@@ -849,8 +866,11 @@
           ${mine ? '' : `<div class="behind">${notesHTML(d && d.notes)}</div>`}`;
       }).join('');
     } else body = `<div class="splash-txt" style="margin:.6rem 0">${e.night <= 1 || (e.saved === false && !died.length && g.day <= 2 && e.night === 1) ? '🌼 A quiet night in the Hollow.' : e.saved ? '🦔 Everyone is safe! Someone was protected.' : '🌼 Everyone woke up safe.'}</div>`;
-    const clues = (e.clues || []).length ? `<div class="scene-box"><b>🔍 Clues at the scene</b><ul>${e.clues.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
-      <p class="small muted" style="margin:.3rem 0 0">Compare these with everyone's alibis. Who was where last night?</p></div>` : '';
+    const outs = (e.outs || []).length ? `<li>🌑 Lanterns went dark near ${e.outs.map((o) => `${esc(o.zone)} (${o.when})`).join(', ')}</li>` : '';
+    const lampOuts = (e.lampOuts || []).length ? `<li>💨 A street lamp was blown out near ${e.lampOuts.map((o) => esc(o.zone)).join(', ')}</li>` : '';
+    const clues = e.zone || outs || lampOuts ? `<div class="scene-box"><b>🔍 What the village noticed</b><ul>
+      ${e.zone ? `<li>📍 It happened near <b>${esc(e.zone)}</b>${(g.scenes || []).some((x) => x.night === e.night && x.mole) ? ' and there were no footprints, just fresh dirt 🕳️' : ''}</li>` : ''}${outs}${lampOuts}</ul>
+      <p class="small muted" style="margin:.3rem 0 0">👣 Last night's footprints are on the village map. Drag the slider to replay who walked where, and when.</p></div>` : '';
     const lit = (e.lit || []).length ? `<p class="small" style="text-align:center">🏮 A lantern now glows at ${e.lit.map((x) => `${nm(x)}'s house`).join(' and ')} for tonight.</p>` : '';
     const learnedHTML = learned.length && g.alive.includes(S.me) ? `<h3 style="margin-top:1rem">🔮 What you learned</h3>${learned.map((l) => { const t = l.text.replace(/^Night \d+: /, ''); return `<div class="secret new"><span>${esc(t.charAt(0).toUpperCase() + t.slice(1))}</span></div>`; }).join('')}` : '';
     const m = modal(`<div class="modal-hero"><span class="big-emoji">🌅</span><h2>Morning in the Hollow</h2></div>${body}${clues}${lit}${learnedHTML}
@@ -894,7 +914,7 @@
         return `<li>${nm(v.from)} ${verb} ${nm(v.to)}${v.hidden ? ' (underground 🕳️)' : ''}</li>`;
       }).join('');
       const placeName = (id) => (id === 'home' ? '🏠 home' : (() => { const pl = g.places.find((x) => x.id === id); return pl ? `${pl.e} ${pl.name}` : id; })());
-      const walkLine = h.walks && Object.keys(h.walks).length ? `<li>🚶 ${Object.entries(h.walks).map(([id, pl]) => `${nm(id)}: ${placeName(pl)}`).join(' · ')}</li>` : '';
+      const walkLine = '';
       const sceneLine = h.scene ? `<li>🔍 ${h.scene.map(esc).join(' ')}</li>` : '';
       const extra = walkLine + sceneLine + (h.meddles || []).map((m) => `<li>🎭 ${nm(m.by)} meddled with ${nm(m.target)}</li>`).join('')
         + (h.lit || []).map((x) => `<li>🏮 A lantern glowed at ${nm(x)}'s house</li>`).join('');
@@ -926,7 +946,7 @@
     wrap.classList.toggle('low', s <= 10);
     ring.style.strokeDashoffset = 113.1 * (1 - Math.min(1, ms / (ui.phaseTotal || 1)));
     const meAlive = g.alive.includes(S.me);
-    if (g.phase === 'night' && meAlive && hasNight(g) && Date.now() - ui.phaseStart > 9000 && !g.mySneakVote && !g.myAction) hint(`night${g.day}`, 'tap one of the glowing houses on the map to use your ability!');
+    if (g.phase === 'night' && meAlive && hasNight(g) && Date.now() - ui.phaseStart > 9000 && !g.mySneakVote && !g.myAction) hint(`night${g.day}`, 'walk to a critter\'s door and hold E to use your ability!');
   }, 250);
 
   buildHome();

@@ -88,11 +88,10 @@ function schedule(room, p, msg, ch, i) {
 // ---------- Sneak teammates follow a human's call in the Den ----------
 function denOrders(room, msg, pool) {
   const g = room.game;
-  if (g.phase !== 'night' || g.settling) return;
+  if (g.phase !== 'night' || g.settling || !g.night) return;
   const text = msg.text.toLowerCase();
   const target = [...g.alive].find((id) => !isSneakTeam(g.roles[id]) && nameIn(text, room.name(id)));
-  if (!target) return;
-  for (const p of pool) setTimeout(() => { if (room.game === g && g.phase === 'night') room.act(p.id, { t: 'night', target }); }, 600 + Math.random() * 1500);
+  if (target) g.night.teamTarget = target; // AI teammates go after whoever you name
 }
 
 // ---------- shared knowledge helpers ----------
