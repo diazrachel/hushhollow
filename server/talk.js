@@ -175,14 +175,18 @@ function ruleReply(room, p, msg, ch) {
   }
   if (/(learn|see|saw|info|hint|result|find|found|check|watch|peek|last night|what happened)/.test(text)) {
     if (sneak) {
-      const fake = pick([...g.alive].filter((x) => x !== me));
-      return fake && g.day >= 2 ? `peeked at ${room.name(fake)}'s house, ${pick(['nobody else came by', '1 other critter visited'])}` : pick(T.noinfo);
+      const cover = coverRole(g, p);
+      const pool = [...g.alive].filter((x) => x !== me && !isSneakTeam(g.roles[x]));
+      if (cover === 'owl' && pool.length >= 2 && g.day >= 2) return `Owl here 🦉 at least one of ${listNames(room, shuffle(pool).slice(0, 3))} is a Sneak`;
+      if (cover === 'hedgehog' && pool.length && g.day >= 2) return `I protected ${room.name(pick(pool))} last night 🦔`;
+      return pick(["I'm just a villager, I slept all night 😴", 'no info, villager life 🏡', 'nothing, I was asleep']);
     }
     const h = lastHint(g, me), sw = lastSaw(g, me), pk = lastPeek(g, me);
     if (h && (g.day >= 2 || AI.mem(g, me).claimedRole)) return `Owl here 🦉 at least one of ${listNames(room, h.hint.group)} ${h.hint.yes ? 'is a Sneak' : 'is NOT a Sneak'}`;
     if (sw) return sw.saw.visitors.length ? `I saw ${listNames(room, sw.saw.visitors)} at ${room.name(sw.saw.house)}'s house 👀` : `I watched ${room.name(sw.saw.house)}'s house, nobody came`;
     if (pk) return `I peeked at ${room.name(pk.peek.house)}'s house: ${pk.peek.count === 0 ? 'nobody else visited' : `${pk.peek.count} visitor${pk.peek.count > 1 ? 's' : ''}`}`;
     if (h) return pick(T.hedge);
+    if (!ROLES[role].night) return pick(["I'm just a villager, no night info 😴", 'nothing, I slept. but I\'m listening 👂', 'no ability, just vibes and a vote 🗳️']);
     return pick(T.noinfo);
   }
   if (others.length && /(trust|believe|safe|innocent|clear)/.test(text)) {
@@ -267,17 +271,17 @@ async function llmReply(room, p, msg, ch) {
 }
 function roleAbility(role) {
   return {
-    villager: 'each night you peek at a house and learn how many critters visited.',
+    villager: 'you have no special ability: you sleep at night and use your voice and vote during the day.',
     owl: 'each night you watch a critter and get one true fuzzy hint about them plus two random others.',
     hedgehog: 'each night you protect one critter from the Sneaks.',
     bunny: 'each night you watch a house and learn who visited it.',
-    turtle: 'you can reveal yourself once for a double vote.',
+    turtle: 'you have no night action, but you can reveal yourself once during the day for a double vote.',
     lantern: 'each night you light a house so Sneaks cannot reach it the next night.',
     sneak: 'each night your team spirits one critter away.',
     trickster: 'each night your team spirits one critter away, and you scramble one critter\'s info.',
-    mole: 'your visits are invisible and your team can tunnel under lanterns.',
-    frog: 'you peek at houses like a Villager.',
-    moth: 'you peek at houses like a Villager.',
+    mole: 'the Gossip Bunny cannot see your visits, and your team can tunnel under lanterns.',
+    frog: 'you have no night action.',
+    moth: 'you have no night action.',
   }[role] || '';
 }
 

@@ -203,7 +203,7 @@ class Room {
       let j = roles.indexOf(forced);
       if (j < 0) {
         const team = ROLES[forced].team;
-        j = roles.findIndex((r) => (team === 'sneaks' ? r === 'sneak' : r === 'villager'));
+        j = roles.findIndex((r) => (team === 'sneaks' ? isSneakTeam(r) : r === 'villager'));
         if (j < 0) j = roles.findIndex((r) => !isSneakTeam(r));
         roles[j] = forced;
       }
@@ -294,7 +294,8 @@ class Room {
 
   needsNightAction(id) {
     const g = this.game, r = g.roles[id];
-    if (isSneakTeam(r) && !g.settling) return !(id in g.sneakVotes);
+    if (isSneakTeam(r)) return !g.settling && !(id in g.sneakVotes);
+    if (!ROLES[r].night) return false; // Villagers and other no-ability roles just sleep
     return !(id in g.actions);
   }
   moleAlive() { const g = this.game; return [...g.alive].some((id) => g.roles[id] === 'mole'); }
@@ -311,15 +312,16 @@ class Room {
       return this.changed();
     }
     if (!g.alive.has(t) || t === p.id) return;
-    let kind = ROLES[role].night;
+    const kind = ROLES[role].night;
     if (isSneakTeam(role)) {
-      if (g.settling) kind = 'peek';
-      else {
+      if (g.settling) return; // quiet night: Sneaks rest too
+      {
         if (isSneakTeam(g.roles[t])) return;
         if (g.lit.has(t) && !this.moleAlive()) return; // lanterns keep Sneaks away (only a Mole can tunnel in)
         g.sneakVotes[p.id] = t; return this.afterNightAction();
       }
     }
+    if (!kind) return;
     if (kind === 'protect' && g.lastProtect[p.id] === t) return;
     if (kind === 'light' && g.lastLight[p.id] === t) return;
     g.actions[p.id] = { kind, target: t };
@@ -400,7 +402,7 @@ class Room {
         }
         const names = listNames(shown.map((x) => this.name(x)));
         const text = `Night ${night}: you watched ${tn}. ${yes ? `At least one of ${names} is a Sneak.` : `At least one of ${names} is NOT a Sneak.`}`;
-        if (g.n <= 7) { g.owlPending.push({ to: id, text, hint: { group: shown, yes }, at: night + 1 }); this.priv(id, `Night ${night}: you watched ${tn}. In a small village the answer takes a night to arrive.`); }
+        if (g.n <= 8) { g.owlPending.push({ to: id, text, hint: { group: shown, yes }, at: night + 1 }); this.priv(id, `Night ${night}: you watched ${tn}. In a small village the answer takes a night to arrive.`); }
         else this.priv(id, text, { hint: { group: shown, yes } });
       } else if (a.kind === 'peek') {
         let c = visitorsTo(a.target, id).length;

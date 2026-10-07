@@ -2,36 +2,40 @@
 // `night` is the kind of action the role takes at night.
 
 const ROLES = {
-  villager: { name: 'Villager', team: 'village', points: 1, night: 'peek' },
-  owl:      { name: 'Owl', team: 'village', points: 7, night: 'check' },
+  villager: { name: 'Villager', team: 'village', points: 1, night: null },   // no ability: just a voice and a vote
+  owl:      { name: 'Owl', team: 'village', points: 5, night: 'check' },
   hedgehog: { name: 'Hedgehog', team: 'village', points: 5, night: 'protect' },
   bunny:    { name: 'Gossip Bunny', team: 'village', points: 5, night: 'gossip' },
-  turtle:   { name: 'Elder Turtle', team: 'village', points: 4, night: 'peek' },
-  lantern:  { name: 'Lantern Keeper', team: 'village', points: 6, night: 'light' },
+  turtle:   { name: 'Elder Turtle', team: 'village', points: 3, night: null },
+  lantern:  { name: 'Lantern Keeper', team: 'village', points: 5, night: 'light' },
   sneak:    { name: 'Sneak', team: 'sneaks', points: -6, night: 'kill' },
-  trickster:{ name: 'Trickster', team: 'sneaks', points: -8, night: 'kill' },
+  trickster:{ name: 'Trickster', team: 'sneaks', points: -7, night: 'kill' },
   mole:     { name: 'Shadow Mole', team: 'sneaks', points: -7, night: 'kill' },
-  frog:     { name: 'Pond Frog', team: 'frog', points: -3, night: 'peek' },
-  moth:     { name: 'Wandering Moth', team: 'moth', points: -2, night: 'peek' },
+  frog:     { name: 'Pond Frog', team: 'frog', points: -2, night: null },
+  moth:     { name: 'Wandering Moth', team: 'moth', points: -1, night: null },
 };
 
 const isSneakTeam = (role) => ROLES[role] && ROLES[role].team === 'sneaks';
 
-function sneakCount(n) { if (n <= 7) return 1; if (n <= 12) return 2; return 3; }
-function powerRange(n) {
-  const table = { 4: [1, 1], 5: [1, 1], 6: [2, 2], 7: [1, 1], 8: [5, 5], 9: [4, 5], 10: [4, 5], 11: [3, 4], 12: [3, 3], 13: [6, 7], 14: [6, 6] };
-  return table[n] || [5, 6];
+// ---- Composition rules ----
+// - Villagers have no ability and are always the most common role.
+// - Owls: 1 under 13 players, 2 at 13+.
+// - Sneaks: up to 3, each a different type (Sneak, Trickster, Shadow Mole), picked at random.
+// - Every other role appears at most once.
+const SNEAK_TYPES = ['sneak', 'trickster', 'mole'];
+function sneakCount(n) { if (n <= 8) return 1; if (n <= 12) return 2; return 3; }
+const owlCount = (n) => (n >= 13 ? 2 : 1);
+// Village roles besides the Owl(s), by player count (tuned with simulations)
+function extraPowerRange(n) {
+  const table = { 4: [0, 0], 5: [0, 1], 6: [1, 2], 7: [1, 1], 8: [0, 1], 9: [3, 3], 10: [2, 3], 11: [2, 3], 12: [2, 3], 13: [3, 4], 14: [3, 4] };
+  return table[n] || [3, 4];
 }
 function soloRange(n, spice) {
   if (spice !== 'chaos' || n < 6) return [0, 0];
   if (n <= 9) return [0, 1];
   return [1, 1];
 }
-const POWER_POOLS = {
-  cozy:    { owl: 3, hedgehog: 2 },
-  classic: { owl: 2, hedgehog: 2, bunny: 1, turtle: 1, lantern: 1 },
-  chaos:   { owl: 2, hedgehog: 2, bunny: 1, turtle: 1, lantern: 1 },
-};
+const POOLS = { cozy: ['hedgehog', 'bunny'], classic: ['hedgehog', 'bunny', 'turtle', 'lantern'], chaos: ['hedgehog', 'bunny', 'turtle', 'lantern'] };
 
 const rint = (a, b, rng) => a + Math.floor(rng() * (b - a + 1));
 const pick = (arr, rng = Math.random) => arr[Math.floor(rng() * arr.length)];
@@ -41,50 +45,36 @@ function shuffle(arr, rng = Math.random) {
   return a;
 }
 
-function oneSetup(n, spice, rng) {
-  const roles = [];
-  // Sneak team
-  const s = sneakCount(n);
-  roles.push('sneak');
-  const extras = spice === 'cozy' ? [] : spice === 'classic' ? ['trickster'] : shuffle(['trickster', 'mole'], rng);
-  for (let i = 1; i < s; i++) {
-    if (extras.length && rng() < 0.6) roles.push(extras.shift()); else roles.push('sneak');
-  }
-  // Solo
+// The village side of one candidate setup (sneaks are chosen separately, at random)
+function villageSide(n, spice, sneaks, rng) {
+  const owls = owlCount(n);
+  const roles = Array(owls).fill('owl');
+  const pool = POOLS[spice] || POOLS.cozy;
+  const [emin, emax] = extraPowerRange(n);
+  // Hedgehog comes first so every game with an extra role can protect someone
+  const order = ['hedgehog', ...shuffle(pool.filter((r) => r !== 'hedgehog'), rng)];
+  const extras = order.slice(0, Math.min(pool.length, rint(emin, emax, rng)));
+  roles.push(...extras);
   const [smin, smax] = soloRange(n, spice);
-  const solos = rint(smin, smax, rng);
-  for (let i = 0; i < solos; i++) roles.push(pick(['frog', 'moth'], rng));
-  // Village power roles (Owl always first, Hedgehog second)
-  const pool = { ...POWER_POOLS[spice] || POWER_POOLS.cozy };
-  const [pmin, pmax] = powerRange(n);
-  const room = n - roles.length;
-  let power = Math.min(rint(pmin, pmax, rng), room);
-  const chosen = [];
-  const take = (r) => { if (pool[r] > 0 && chosen.length < power) { chosen.push(r); pool[r]--; } };
-  take('owl'); take('hedgehog');
-  while (chosen.length < power) {
-    const left = Object.keys(pool).filter((k) => pool[k] > 0);
-    if (!left.length) break;
-    // Prefer roles not yet used before doubling up
-    const fresh = left.filter((k) => !chosen.includes(k));
-    take(pick(fresh.length ? fresh : left, rng));
-  }
-  roles.push(...chosen);
-  while (roles.length < n) roles.push('villager');
+  roles.push(...shuffle(['frog', 'moth'], rng).slice(0, rint(smin, smax, rng)));
+  // Villagers must outnumber every other role (so more than the Owls)
+  while (n - sneaks - roles.length <= owls && roles.length > owls) roles.pop();
+  while (sneaks + roles.length < n) roles.push('villager');
   return roles;
 }
 
-// Builds a balanced role list: samples many legal setups for this size and
-// keeps the one whose point total is closest to 0 (target window: -2..+2).
+// Builds a balanced setup: Sneak types are random, then the village side is chosen from
+// many legal candidates, keeping the one whose point total is closest to 0.
 function generateSetup(n, spice = 'cozy', rng = Math.random) {
+  const sneaks = shuffle(SNEAK_TYPES, rng).slice(0, sneakCount(n));
+  const sneakPts = sneaks.reduce((sum, r) => sum + ROLES[r].points, 0);
   let best = null, bestScore = Infinity;
-  for (let i = 0; i < 300; i++) {
-    const roles = oneSetup(n, spice, rng);
-    const total = roles.reduce((sum, r) => sum + ROLES[r].points, 0);
-    const score = Math.abs(total) + rng() * 0.5;
-    if (score < bestScore) { best = roles; bestScore = score; }
+  for (let i = 0; i < 200; i++) {
+    const side = villageSide(n, spice, sneaks.length, rng);
+    const score = Math.abs(sneakPts + side.reduce((sum, r) => sum + ROLES[r].points, 0)) + rng() * 0.5;
+    if (score < bestScore) { best = side; bestScore = score; }
   }
-  return shuffle(best, rng);
+  return shuffle([...sneaks, ...best], rng);
 }
 
 module.exports = { ROLES, isSneakTeam, generateSetup, shuffle, pick };

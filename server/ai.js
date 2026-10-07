@@ -157,7 +157,9 @@ function night(room, p) {
     return;
   }
 
-  const kind = isSneakTeam(role) ? 'peek' : ROLES[role].night;
+  if (isSneakTeam(role)) return; // quiet night
+  const kind = ROLES[role].night;
+  if (!kind) return; // Villagers and other no-ability roles sleep
   const legal = others.filter((id) => !(kind === 'protect' && id === g.lastProtect[me]) && !(kind === 'light' && id === g.lastLight[me]));
   if (level === 'sleepy') return send(pick(legal.length ? legal : others));
   const s = suspicion(room, p);
@@ -188,7 +190,7 @@ function notes(room, p) {
   if (sneak && !M.fakeNights.has(g.day) && g.day >= 2) {
     M.fakeNights.add(g.day);
     const t = pick([...g.alive].filter((id) => id !== me));
-    if (t) room.act(me, { t: 'note', text: `Night ${g.day}: peeked at ${room.name(t)}'s house. ${pick(['Nobody else visited.', '1 other critter visited.'])}` });
+    if (t) room.act(me, { t: 'note', text: `Day ${g.day}: ${pick([`${room.name(t)} is acting off.`, `keeping an eye on ${room.name(t)}.`, `not sure about ${room.name(t)} yet.`])}` });
   }
 }
 

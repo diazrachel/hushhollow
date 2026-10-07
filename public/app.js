@@ -203,7 +203,7 @@
     let body = '';
     if (tab === 'rules') body = `<div class="hb-grid">${HANDBOOK.rules.map(([ic, t, d]) => `<div class="hb-card"><div class="ic">${ic}</div><h3>${t}</h3><p>${d}</p></div>`).join('')}</div>`;
     else if (tab === 'roles') {
-      body = `<p class="muted">Cozy games use the Owl, Hedgehog, Villager, and Sneak. Classic adds the Gossip Bunny, Elder Turtle, Lantern Keeper, and Trickster. Chaos adds the Shadow Mole and the solo roles.</p>
+      body = `<p class="muted">Villagers are always the most common role. There are 1 or 2 Owls, up to 3 Sneaks (each a different type, picked at random), and every other role appears at most once. Cozy uses the Owl, Hedgehog, and Gossip Bunny. Classic adds the Elder Turtle and Lantern Keeper. Chaos adds the solo roles.</p>
       <div class="hb-grid">${Object.values(ROLES).map((r) => `<div class="hb-card ${r.team === 'sneaks' ? 'sneaks' : ''}"><div class="ic">${r.icon}</div><h3>${r.name}</h3><p class="small"><b>${TEAM_NAMES[r.team]}.</b> ${r.ability}</p><p class="small muted">${r.tip}</p></div>`).join('')}</div>`;
     } else if (tab === 'hints') {
       body = `<div class="hb-grid">${HANDBOOK.hints.map(([t, d]) => `<div class="hb-card"><h3>${t}</h3><p>${d}</p></div>`).join('')}</div>
@@ -291,7 +291,7 @@
       <div><div class="small muted">Timer speed</div>${seg('speed', [['relaxed', 'Relaxed'], ['normal', 'Normal'], ['fast', 'Fast']], st.speed)}</div>
       <div><div class="small muted">If someone disconnects</div>${seg('dropAI', [['sleepy', 'Sleepy AI'], ['clever', 'Clever AI']], st.dropAI)}</div>
       ${S.practice ? `<label class="field">Your role<select id="pr-forced"><option value="">Random</option>${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${st.forcedRole === k ? 'selected' : ''}>${r.icon} ${r.name}</option>`).join('')}</select></label>` : ''}
-      <p class="small muted" style="margin:0">${{ cozy: 'Cozy: Owl, Hedgehog, Villagers, and Sneaks. Best for new players.', classic: 'Classic: adds the Gossip Bunny, Elder Turtle, Lantern Keeper, and Trickster.', chaos: 'Chaos: adds the Shadow Mole and solo roles for experienced groups.' }[st.spice]}</p>
+      <p class="small muted" style="margin:0">${{ cozy: 'Cozy: Owl, Hedgehog, Gossip Bunny, and Villagers. Best for new players.', classic: 'Classic: adds the Elder Turtle and Lantern Keeper.', chaos: 'Chaos: adds the solo roles (Pond Frog, Wandering Moth) for experienced groups.' }[st.spice]}</p>
       </div>`;
     const list = $('#lb-chat');
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
@@ -392,13 +392,17 @@
       <rect class="door" x="35" y="35" width="12" height="18" rx="6"/></svg>`;
   }
 
+  function hasNight(g) {
+    const r = ROLES[g.myRole];
+    return r.team === 'sneaks' ? !g.settling : !!r.verb;
+  }
   function phaseInfo(g) {
     const r = ROLES[g.myRole], meAlive = g.alive.includes(S.me), onTeam = r.team === 'sneaks';
     const picked = g.mySneakVote || (g.myAction && g.myAction.target);
     const map = {
       night: ['🌙', g.settling ? 'Quiet night' : `Night ${g.day}`,
         !meAlive ? "You're a Wisp: read every chat, even the Den" : picked ? '✓ Done! Waiting for morning…'
-          : onTeam && !g.settling ? 'Pick who to spirit away' : `${g.settling && onTeam ? 'Peek at a house' : r.verb}: tap a glowing house`],
+          : onTeam && !g.settling ? 'Pick who to spirit away' : !hasNight(g) ? 'Sleep tight 💤 Nothing to do tonight' : `${r.verb}: tap a glowing house`],
       dawn: ['🌅', 'Morning', 'Read the morning report'],
       day: ['☀️', `Day ${g.day}`, !meAlive ? 'Wisps watch from the mist' : g.bigGame ? 'Nominate a suspect, then press Ready' : 'Share hints on the Board, then press Ready'],
       defense: ['🎤', 'Defense', `Listen to ${P(g.nominees[g.defenseIdx])?.name || 'the nominee'}`],
@@ -449,7 +453,7 @@
     const myPick = g.phase === 'night' ? (meAlive ? (g.mySneakVote || (g.myAction && g.myAction.target)) : null) : g.phase === 'vote' ? g.votes[me] : null;
     const speaking = g.phase === 'defense' ? g.nominees[g.defenseIdx] : null;
     const targetable = (id) => {
-      if (g.phase === 'night') return meAlive && !myPick && id !== me && alive.has(id) && !(onTeam && !g.settling && (team.has(id) || (lit.has(id) && !g.moleAlive)))
+      if (g.phase === 'night') return meAlive && hasNight(g) && !myPick && id !== me && alive.has(id) && !(onTeam && !g.settling && (team.has(id) || (lit.has(id) && !g.moleAlive)))
         && !(g.myRole === 'hedgehog' && g.lastProtect === id) && !(g.myRole === 'lantern' && g.lastLight === id);
       if (g.phase === 'vote') return meAlive && !g.votes[me] && g.nominees.includes(id) && id !== me;
       return false;
@@ -478,6 +482,7 @@
     if (g.phase === 'over') return;
     if (g.phase === 'night') {
       if (!meAlive) return toast("Wisps can't act at night. Peek at the Den in Chat!");
+      if (!hasNight(g)) return toast("You're asleep 💤 You don't have a night ability.");
       if (id === S.me) return toast("Pick someone else's house.");
       if (!g.alive.includes(id)) return toast('That critter is already a Wisp.');
       if (g.myRole === 'hedgehog' && g.lastProtect === id) return toast("You can't protect the same critter two nights in a row.");
@@ -540,7 +545,8 @@
         if (g.lit.length) actions += `<p class="small muted" style="margin:.3rem 0 0">${g.moleAlive ? '🕳️ Your Mole can tunnel under lanterns.' : '🏮 Lantern-lit houses are off limits tonight.'}</p>`;
       } else {
         who = g.myAction && g.myAction.target; done = !!who;
-        text = who ? 'You chose:' : g.settling && onTeam ? 'Quiet night: nobody vanishes. Peek at a house so you look normal.' : `${r.verb}: tap a house on the map.`;
+        text = who ? 'You chose:' : g.settling && onTeam ? 'Quiet night: nobody vanishes. Rest up and plan with your team in the Den.'
+          : !hasNight(g) ? "You don't have a night ability. Sleep tight 💤 Tomorrow, your voice and your vote are what count." : `${r.verb}: tap a house on the map.`;
         if (g.myRole === 'hedgehog' && g.lastProtect) actions += `<p class="small muted" style="margin:.3rem 0 0">Can't protect ${nm(g.lastProtect)} twice in a row.</p>`;
         if (g.myRole === 'lantern' && g.lastLight) actions += `<p class="small muted" style="margin:.3rem 0 0">Can't light ${nm(g.lastLight)}'s house twice in a row.</p>`;
       }
@@ -796,7 +802,7 @@
       </div></div></div>
       <div class="howto">
         <div><span>🎯</span><span>${GOALS[r.team]}</span></div>
-        <div><span>🌙</span><span>${r.ability}</span></div>
+        <div><span>${r.verb || r.team === 'sneaks' ? '🌙' : '🗣️'}</span><span>${r.ability}</span></div>
         ${mates.length ? `<div><span>🌑</span><span>Your teammates: <b>${mates.map((id) => nm(id)).join(', ')}</b>. Plot together in the Den chat.</span></div>` : ''}
         <div><span>💡</span><span>${r.tip}</span></div>
         ${again ? '' : '<div><span>🤫</span><span>Keep it secret! Roles are only revealed when the game ends.</span></div>'}
@@ -890,7 +896,7 @@
     wrap.classList.toggle('low', s <= 10);
     ring.style.strokeDashoffset = 113.1 * (1 - Math.min(1, ms / (ui.phaseTotal || 1)));
     const meAlive = g.alive.includes(S.me);
-    if (g.phase === 'night' && meAlive && Date.now() - ui.phaseStart > 9000 && !g.mySneakVote && !g.myAction) hint(`night${g.day}`, 'tap one of the glowing houses on the map to use your ability!');
+    if (g.phase === 'night' && meAlive && hasNight(g) && Date.now() - ui.phaseStart > 9000 && !g.mySneakVote && !g.myAction) hint(`night${g.day}`, 'tap one of the glowing houses on the map to use your ability!');
   }, 250);
 
   buildHome();
