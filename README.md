@@ -8,7 +8,8 @@ A free, cozy social deduction game you play in the browser. A few critters in th
 - Hints, not answers: every info role gets fuzzy information you have to reason about
 - Role reveal cards, phase banners, a morning report, animated vote results, and AI critters that chat
 - Private Notepad that becomes public when you're eliminated (roles are never revealed until the end)
-- Claim Board with structured cards, so players can coordinate without a shared language
+- A Board where anyone can pin notes in their own words (theories, accusations, defenses, questions). Nothing forces a role reveal; it's a bluffing game
+- Light and dark mode (follows your device, or toggle with the 🌙 button)
 - First Night tutorial, Practice Burrow, and the Hollow Handbook
 - Server-authoritative: nobody can see roles by opening DevTools
 
@@ -53,6 +54,7 @@ server/
   roles.js   Roles, point values, and the auto-balancer for 4–14 players
   ai.js      Rule-based AI critters (they use the same actions as humans, no peeking)
   talk.js    AI chat replies: free rule-based brain + optional Claude brain
+  hear.js    Lets AI critters understand what players say in chat and on the Board
   filter.js  Chat and nickname filter
 public/
   index.html, style.css
@@ -68,7 +70,7 @@ The server owns every secret. Clients send intents ("I visit house 4") and only 
 | Role | Team | Ability |
 |---|---|---|
 | Villager | Village | No ability: a voice and a vote. Always the most common role |
-| Owl | Village | Watch a critter: get one true fuzzy hint about them + 2 random others. 1 per game (2 at 13+ players) |
+| Owl | Village | Watch a critter: get one true fuzzy hint about them + 2 random others. 1 per game (2 at 9+ players) |
 | Hedgehog | Village | Protect a critter from the Sneaks (not the same one twice in a row) |
 | Gossip Bunny | Village | Watch a house: learn who visited, but not why |
 | Elder Turtle | Village | Reveal once during the day for a double vote |
@@ -81,7 +83,7 @@ The server owns every secret. Clients send intents ("I visit house 4") and only 
 
 Up to 3 Sneaks, each a different type picked at random. Every role except Villager and Owl appears at most once per game.
 
-Spice levels: **Cozy** (Owl, Hedgehog, Gossip Bunny), **Classic** (+ Elder Turtle, Lantern Keeper), **Chaos** (+ solo roles).
+Spice levels: **Cozy** (Owl, Hedgehog, Gossip Bunny, Lantern Keeper), **Classic** (+ Elder Turtle), **Chaos** (+ solo roles).
 
 ## Tuning balance
 

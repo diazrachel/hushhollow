@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hush Hollow</title>
+  <meta name="description" content="A free, cozy social deduction game. Find the Sneaks hiding in the village. No account needed.">
+  <meta name="theme-color" content="#BFE6F5">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Pick light/dark before the page paints, so there's no white flash
+    (function () {
+      var t = 'auto';
+      try { t = (JSON.parse(localStorage.getItem('hh-profile') || '{}').theme) || 'auto'; } catch (e) {}
+      var dark = t === 'dark' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
+</head>
+<body class="phase-home">
+  <div id="sky" aria-hidden="true"><div class="stars"></div></div>
+
+  <!-- ============ HOME ============ -->
+  <main id="home" class="screen">
+    <header class="hero">
+      <div class="hero-village" id="hero-village" aria-hidden="true"></div>
+      <h1 class="title">Hush <span class="acc">Hollow</span></h1>
+      <p class="tagline">A few critters in the village are secretly <b>Sneaks</b>. Find them before they take over.</p>
+      <div class="hero-pills"><span>🆓 Free forever</span><span>🔓 No account</span><span>🌍 Play worldwide</span><span>🤖 AI critters</span></div>
+    </header>
+
+    <section class="card profile-card" aria-labelledby="you-h">
+      <h2 id="you-h">Your critter</h2>
+      <div class="profile-row">
+        <div id="profile-preview" class="avatar big"></div>
+        <label class="field grow">
+          <span>Nickname</span>
+          <input id="name-input" maxlength="16" autocomplete="off" placeholder="Pick a nickname">
+        </label>
+      </div>
+      <div class="picker" id="critter-picker" role="radiogroup" aria-label="Critter"></div>
+      <div class="picker colors" id="color-picker" role="radiogroup" aria-label="Color"></div>
+      <div class="picker hats" id="hat-picker" role="radiogroup" aria-label="Hat"></div>
+    </section>
+
+    <section class="play-grid">
+      <div class="card play-card">
+        <div class="tile-icon">🌍</div><h2>Quick Play</h2>
+        <p>Join a public game with players from around the world.</p>
+        <div class="row">
+          <select id="lang-select" aria-label="Lobby language">
+            <option value="en">English</option><option value="es">Español</option><option value="pt">Português</option>
+            <option value="fr">Français</option><option value="de">Deutsch</option><option value="tr">Türkçe</option>
+            <option value="id">Bahasa Indonesia</option><option value="tl">Tagalog</option><option value="ja">日本語</option>
+            <option value="ko">한국어</option><option value="zh">中文</option><option value="ru">Русский</option>
+          </select>
+          <button class="btn primary" id="quick-btn">Quick Play</button>
+        </div>
+        <label class="check"><input type="checkbox" id="sprout-check"> Beginner lobbies (Cozy roles only)</label>
+      </div>
+      <div class="card play-card">
+        <div class="tile-icon">🏡</div><h2>Play with friends</h2>
+        <p>Make a private burrow and share the link.</p>
+        <button class="btn primary" id="create-btn">Make a Burrow</button>
+        <div class="row join-row">
+          <input id="code-input" maxlength="4" placeholder="Code" aria-label="Burrow code" autocomplete="off">
+          <button class="btn" id="join-btn">Join</button>
+        </div>
+      </div>
+      <div class="card play-card learn">
+        <div class="tile-icon">🦡</div><h2>New here?</h2>
+        <p>Learn the game in about 4 minutes.</p>
+        <button class="btn honey" id="tutorial-btn">Play the First Night tutorial</button>
+        <div class="row">
+          <button class="btn" id="practice-btn">Practice Burrow</button>
+          <button class="btn" id="handbook-btn">Hollow Handbook</button>
+        </div>
+      </div>
+    </section>
+    <footer class="home-foot">
+      <span class="row" style="gap:1rem"><button class="link" id="settings-btn">⚙️ Settings and carry code</button><button class="link" id="home-theme-btn">🌙 Dark mode</button></span>
+      <span>Made with 🍄 in the Hollow</span>
+    </footer>
+  </main>
+
+  <!-- ============ LOBBY ============ -->
+  <main id="lobby" class="screen hidden"></main>
+
+  <!-- ============ GAME ============ -->
+  <main id="game" class="screen hidden">
+    <header class="hud">
+      <div class="hud-phase">
+        <div class="hud-emblem" id="hud-emblem" aria-hidden="true">🌙</div>
+        <div class="hud-text"><div class="hud-title" id="phase-name">Night 1</div><div class="hud-goal" id="hud-goal"></div></div>
+      </div>
+      <div class="hud-timer" title="Time left">
+        <svg viewBox="0 0 44 44" aria-hidden="true"><circle class="ring-bg" cx="22" cy="22" r="18"/><circle class="ring" id="timer-ring" cx="22" cy="22" r="18"/></svg>
+        <span id="timer">0:30</span>
+      </div>
+      <div class="hud-right">
+        <button id="role-chip" class="role-chip" aria-label="Open my role card"></button>
+        <button class="icon-btn theme-btn" id="g-theme-btn" title="Light or dark mode" aria-label="Toggle dark mode">🌙</button>
+        <button class="icon-btn" id="sound-btn" title="Sound" aria-label="Toggle sound">🔔</button>
+        <button class="icon-btn" id="g-handbook-btn" title="How to play" aria-label="How to play">❔</button>
+        <button class="icon-btn" id="leave-btn" title="Leave game" aria-label="Leave game">🚪</button>
+      </div>
+    </header>
+
+    <div class="stage">
+      <aside class="side-left">
+        <section class="panel role-panel" id="action-card"></section>
+        <section class="panel secrets-panel">
+          <h3 class="ribbon">📜 What you know</h3>
+          <div id="secrets"></div>
+        </section>
+      </aside>
+
+      <section class="scene" id="scene">
+        <div class="sky" aria-hidden="true">
+          <div class="sun"></div><div class="moon"></div>
+          <span class="cloud c1">☁️</span><span class="cloud c2">☁️</span><span class="cloud c3">☁️</span>
+          <div class="stars"></div>
+        </div>
+        <div class="decor" aria-hidden="true">
+          <span style="left:2%;top:14%">🌳</span><span style="left:9%;top:9%;font-size:1.6em">🌲</span>
+          <span style="right:3%;top:13%">🌳</span><span style="right:11%;top:8%;font-size:1.5em">🌲</span>
+          <span style="left:3%;bottom:6%">🌲</span><span style="right:4%;bottom:5%">🌳</span>
+          <span style="left:12%;bottom:3%;font-size:1em">🍄</span><span style="right:14%;bottom:2%;font-size:1em">🌼</span>
+          <span style="left:5%;top:48%;font-size:1em">🌷</span><span style="right:5%;top:50%;font-size:1em">🌼</span>
+        </div>
+        <div class="fireflies" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div id="banner" class="banner" aria-live="polite"></div>
+        <div id="map" class="map" aria-label="Village map"></div>
+        <div class="emote-bar" id="emote-bar"></div>
+      </section>
+
+      <aside class="side-right panel">
+        <nav class="tabs" role="tablist" id="tabs">
+          <button role="tab" data-tab="board" class="active">📋 Board</button>
+          <button role="tab" data-tab="chat">💬 Chat<span class="dot hidden" id="chat-dot"></span></button>
+          <button role="tab" data-tab="notes">📝 Notes</button>
+          <button role="tab" data-tab="behind">👻 Gone</button>
+          <button role="tab" data-tab="log">📖 Log</button>
+        </nav>
+        <div class="tab-body" id="tab-board"></div>
+        <div class="tab-body hidden" id="tab-chat">
+          <div class="chat-channels" id="chat-channels"></div>
+          <div class="chat-list" id="chat-list"></div>
+          <div class="typing-line" id="typing-line"></div>
+          <div class="quick-asks" id="quick-asks"></div>
+          <form id="chat-form" class="row">
+            <input id="chat-input" maxlength="240" placeholder="Say something…" autocomplete="off">
+            <button class="btn small">Send</button>
+          </form>
+        </div>
+        <div class="tab-body hidden" id="tab-notes">
+          <p class="muted small">Private while you're alive. If you're eliminated, <b>everyone</b> reads it. Your role stays secret either way.</p>
+          <ol id="note-list" class="note-list"></ol>
+          <div id="note-chips" class="chips"></div>
+          <form id="note-form" class="row">
+            <input id="note-input" maxlength="200" placeholder="Write a note…" autocomplete="off">
+            <button class="btn small">Add</button>
+          </form>
+          <div class="muted small" id="note-count"></div>
+        </div>
+        <div class="tab-body hidden" id="tab-behind"></div>
+        <div class="tab-body hidden" id="tab-log"></div>
+      </aside>
+    </div>
+  </main>
+
+  <div id="overlay" class="overlay hidden" role="dialog" aria-modal="true"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="conn" class="conn hidden">Reconnecting…</div>
+
+  <script src="data.js"></script>
+  <script src="tutorial.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
