@@ -15,11 +15,24 @@
   if (!token || !/^[a-zA-Z0-9-]{16,64}$/.test(token)) { token = randToken(); store.set('hh-token', token); }
   const NAMES = ['Mossy', 'Button', 'Pudding', 'Sorrel', 'Kiwi', 'Bluebell', 'Toffee', 'Pebbles', 'Sage', 'Waffle'];
   const profile = Object.assign({
-    name: '', critter: 'fox', color: 'honey', hat: 'none', games: 0, tutorialDone: false, hints: true, sound: true, motion: true,
+    name: '', critter: 'fox', color: 'honey', hat: 'none', games: 0, tutorialDone: false, hints: true, sound: true, motion: true, theme: 'auto',
   }, store.get('hh-profile', {}));
   if (!profile.name) profile.name = NAMES[Math.floor(Math.random() * NAMES.length)];
   const pubProfile = () => ({ name: profile.name, critter: profile.critter, color: profile.color, hat: profile.hat, games: profile.games });
   function saveProfile() { store.set('hh-profile', profile); send({ t: 'profile', profile: pubProfile() }); }
+
+  // ---------- light / dark ----------
+  const darkQuery = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+  const isDark = () => profile.theme === 'dark' || (profile.theme === 'auto' && !!(darkQuery && darkQuery.matches));
+  function applyTheme() {
+    const dark = isDark();
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.content = dark ? '#211B38' : '#BFE6F5';
+    const g = document.getElementById('g-theme-btn'); if (g) { g.textContent = dark ? '☀️' : '🌙'; g.title = dark ? 'Switch to light mode' : 'Switch to dark mode'; }
+    const h = document.getElementById('home-theme-btn'); if (h) h.textContent = dark ? '☀️ Light mode' : '🌙 Dark mode';
+  }
+  function toggleTheme() { profile.theme = isDark() ? 'light' : 'dark'; saveProfile(); applyTheme(); }
+  if (darkQuery) { const onChange = () => { if (profile.theme === 'auto') applyTheme(); }; if (darkQuery.addEventListener) darkQuery.addEventListener('change', onChange); else if (darkQuery.addListener) darkQuery.addListener(onChange); }
 
   // ---------- connection ----------
   let ws = null, S = null, offset = 0, retry = 0;
@@ -142,6 +155,8 @@
     $('#practice-btn').onclick = openPractice;
     $('#handbook-btn').onclick = () => openHandbook();
     $('#settings-btn').onclick = openSettings;
+    $('#home-theme-btn').onclick = toggleTheme;
+    applyTheme();
     const heroCast = [['bunny', 'berry', 'flower'], ['fox', 'honey', 'none'], ['frog', 'mint', 'mushroom'], ['bear', 'sky', 'cap']];
     $('#hero-village').innerHTML = heroCast.map(([critter, color, hat], i) => `${i === 2 ? '<div class="pond-mini"></div>' : ''}<div class="hv" style="--i:${i}">${cottage({ color })}${avatar({ critter, color, hat })}</div>`).join('');
     updatePreview();
@@ -176,6 +191,7 @@
     const code = btoa(unescape(encodeURIComponent(JSON.stringify({ c: profile.critter, o: profile.color, h: profile.hat, g: profile.games, t: profile.tutorialDone }))));
     const m = modal(`<h2>Settings</h2>
       <div class="settings-grid">
+        <div><div class="small muted" style="font-weight:800">Look</div><div class="seg" id="st-theme">${[['auto', '💻 Match my device'], ['light', '☀️ Light'], ['dark', '🌙 Dark']].map(([v, l]) => `<button data-theme-v="${v}" class="${profile.theme === v ? 'on' : ''}">${l}</button>`).join('')}</div></div>
         <label class="check"><input type="checkbox" id="st-sound" ${profile.sound ? 'checked' : ''}> Sound effects</label>
         <label class="check"><input type="checkbox" id="st-hints" ${profile.hints ? 'checked' : ''}> Beginner tips during your first 3 games</label>
         <label class="check"><input type="checkbox" id="st-motion" ${profile.motion ? 'checked' : ''}> Animations</label>
@@ -184,6 +200,11 @@
       <p class="muted small">Copy this code to move your critter, hat, and unlocks to another device. It holds no personal data.</p>
       <div class="row"><input id="st-code" readonly value="${esc(code)}" class="grow"><button class="btn small" id="st-copy">Copy</button></div>
       <div class="row" style="margin-top:.6rem"><input id="st-import" placeholder="Paste a carry code" class="grow"><button class="btn small" id="st-load">Load</button></div>`);
+    $('#st-theme', m).onclick = (e) => {
+      const b = e.target.closest('[data-theme-v]'); if (!b) return;
+      profile.theme = b.dataset.themeV; saveProfile(); applyTheme();
+      $$('#st-theme button', m).forEach((x) => x.classList.toggle('on', x === b));
+    };
     $('#st-sound', m).onchange = (e) => { profile.sound = e.target.checked; saveProfile(); };
     $('#st-hints', m).onchange = (e) => { profile.hints = e.target.checked; saveProfile(); };
     $('#st-motion', m).onchange = (e) => { profile.motion = e.target.checked; saveProfile(); setPhaseClass(document.body.className.match(/phase-(\S+)/)?.[1] || 'home'); };
@@ -203,7 +224,7 @@
     let body = '';
     if (tab === 'rules') body = `<div class="hb-grid">${HANDBOOK.rules.map(([ic, t, d]) => `<div class="hb-card"><div class="ic">${ic}</div><h3>${t}</h3><p>${d}</p></div>`).join('')}</div>`;
     else if (tab === 'roles') {
-      body = `<p class="muted">Villagers are always the most common role. There are 1 or 2 Owls, up to 3 Sneaks (each a different type, picked at random), and every other role appears at most once. Cozy uses the Owl, Hedgehog, and Gossip Bunny. Classic adds the Elder Turtle and Lantern Keeper. Chaos adds the solo roles.</p>
+      body = `<p class="muted">Villagers are always the most common role. There are 1 or 2 Owls, up to 3 Sneaks (each a different type, picked at random), and every other role appears at most once. Cozy uses the Owl, Hedgehog, Gossip Bunny, and Lantern Keeper. Classic adds the Elder Turtle. Chaos adds the solo roles.</p>
       <div class="hb-grid">${Object.values(ROLES).map((r) => `<div class="hb-card ${r.team === 'sneaks' ? 'sneaks' : ''}"><div class="ic">${r.icon}</div><h3>${r.name}</h3><p class="small"><b>${TEAM_NAMES[r.team]}.</b> ${r.ability}</p><p class="small muted">${r.tip}</p></div>`).join('')}</div>`;
     } else if (tab === 'hints') {
       body = `<div class="hb-grid">${HANDBOOK.hints.map(([t, d]) => `<div class="hb-card"><h3>${t}</h3><p>${d}</p></div>`).join('')}</div>
@@ -291,7 +312,7 @@
       <div><div class="small muted">Timer speed</div>${seg('speed', [['relaxed', 'Relaxed'], ['normal', 'Normal'], ['fast', 'Fast']], st.speed)}</div>
       <div><div class="small muted">If someone disconnects</div>${seg('dropAI', [['sleepy', 'Sleepy AI'], ['clever', 'Clever AI']], st.dropAI)}</div>
       ${S.practice ? `<label class="field">Your role<select id="pr-forced"><option value="">Random</option>${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${st.forcedRole === k ? 'selected' : ''}>${r.icon} ${r.name}</option>`).join('')}</select></label>` : ''}
-      <p class="small muted" style="margin:0">${{ cozy: 'Cozy: Owl, Hedgehog, Gossip Bunny, and Villagers. Best for new players.', classic: 'Classic: adds the Elder Turtle and Lantern Keeper.', chaos: 'Chaos: adds the solo roles (Pond Frog, Wandering Moth) for experienced groups.' }[st.spice]}</p>
+      <p class="small muted" style="margin:0">${{ cozy: 'Cozy: Owl, Hedgehog, Gossip Bunny, Lantern Keeper, and Villagers. Best for new players.', classic: 'Classic: adds the Elder Turtle.', chaos: 'Chaos: adds the solo roles (Pond Frog, Wandering Moth) for experienced groups.' }[st.spice]}</p>
       </div>`;
     const list = $('#lb-chat');
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
@@ -328,7 +349,7 @@
       if (g.phase === 'night') sound('night'); else if (g.phase === 'dawn') sound('chime'); else if (g.phase === 'vote') sound('pop');
       const alive = g.alive.includes(S.me);
       if (!alive && ui.chatCh !== 'wisp') ui.chatCh = 'wisp';
-      if (g.phase === 'day') hint(`day${g.day}`, 'share what you learned with a card on the Board, then press Ready.');
+      if (g.phase === 'day') hint(`day${g.day}`, 'talk it out in Chat or pin a note on the Board. You decide how much to reveal!');
       if (g.phase === 'vote') hint('vote', "tap a house to vote, or Skip if you're unsure.");
     }
     renderGame();
@@ -364,6 +385,7 @@
     };
     $('#role-chip').onclick = () => queueModal(() => showRoleReveal(true));
     $('#g-handbook-btn').onclick = () => openHandbook();
+    $('#g-theme-btn').onclick = toggleTheme; applyTheme();
     $('#sound-btn').onclick = () => { profile.sound = !profile.sound; saveProfile(); $('#sound-btn').textContent = profile.sound ? '🔔' : '🔕'; };
     $('#sound-btn').textContent = profile.sound ? '🔔' : '🔕';
     $('#leave-btn').onclick = () => {
@@ -378,6 +400,7 @@
     });
     $('#tab-board').innerHTML = `<div class="composer" id="composer"></div><div id="claim-list" style="display:flex;flex-direction:column;gap:.5rem"></div>`;
     $('#tab-board').addEventListener('click', onBoardClick);
+    $('#tab-board').addEventListener('input', (e) => { if (e.target.id === 'cp-text') { const c = $('#cp-count'); if (c) c.textContent = `${e.target.value.length}/140`; } });
     gameBuilt = true;
   }
   function setHTML(el, html) { if (el.__html !== html) { el.innerHTML = html; el.__html = html; } }
@@ -404,7 +427,7 @@
         !meAlive ? "You're a Wisp: read every chat, even the Den" : picked ? '✓ Done! Waiting for morning…'
           : onTeam && !g.settling ? 'Pick who to spirit away' : !hasNight(g) ? 'Sleep tight 💤 Nothing to do tonight' : `${r.verb}: tap a glowing house`],
       dawn: ['🌅', 'Morning', 'Read the morning report'],
-      day: ['☀️', `Day ${g.day}`, !meAlive ? 'Wisps watch from the mist' : g.bigGame ? 'Nominate a suspect, then press Ready' : 'Share hints on the Board, then press Ready'],
+      day: ['☀️', `Day ${g.day}`, !meAlive ? 'Wisps watch from the mist' : g.bigGame ? 'Nominate a suspect, then press Ready' : 'Talk it out, then press Ready'],
       defense: ['🎤', 'Defense', `Listen to ${P(g.nominees[g.defenseIdx])?.name || 'the nominee'}`],
       vote: ['🗳️', 'Vote!', !meAlive ? 'The living are voting' : g.votes[S.me] ? '✓ Voted! Waiting for others…' : 'Tap a house to vote'],
       over: ['🏆', 'Game over', g.over && g.over.winner === 'village' ? 'The village wins!' : 'The Sneaks win!'],
@@ -522,7 +545,7 @@
       const a = b.dataset.pm;
       if (a === 'yarn') send({ t: 'yarn', target: tied ? null : id });
       else if (a === 'nom') send({ t: 'nominate', target: nominated ? null : id });
-      else if (a === 'accuse') send({ t: 'claim', kind: 'accuse', target: id });
+      else if (a === 'accuse') { ui.tab = 'board'; ui.sticker = 'accuse'; ui.tags = [id]; ui.compKey = null; renderTabs(); $('#cp-text')?.focus(); }
       else if (a === 'note') { ui.tab = 'notes'; renderTabs(); insert($('#note-input'), p.name); }
       else if (a === 'ask') { ui.tab = 'chat'; ui.chatCh = 'day'; ui.askWho = p.name; renderTabs(); const i = $('#chat-input'); i.value = `${p.name}, `; i.focus(); }
       else if (a === 'mute') { if (ui.muted.has(id)) ui.muted.delete(id); else ui.muted.add(id); renderChat(); }
@@ -560,7 +583,7 @@
       if (!meAlive) text = "You're a Wisp. Watch, read the notepads, chat with other Wisps.";
       else {
         text = g.bigGame && g.noms[S.me] ? 'You nominated:'
-          : `<ol><li>Read the Board</li><li>Share what you learned</li>${g.bigGame ? '<li>Tap a critter → Nominate</li>' : ''}<li>Press Ready to vote</li></ol>`;
+          : `<ol><li>Read the Board and Chat</li><li>Question people, push on stories</li>${g.bigGame ? '<li>Tap a critter → Nominate</li>' : ''}<li>Press Ready to vote</li></ol>`;
         if (g.bigGame) { who = g.noms[S.me]; done = !!who; }
         actions += `<button class="btn small ${g.iReady ? 'on' : 'honey'}" data-a="ready" ${g.iReady ? 'disabled' : ''}>${g.iReady ? '✓ Ready' : '🙋 Ready to vote'}</button>
           <span class="small muted" style="font-weight:800">${g.readyCount}/${g.alive.length} ready</span>`;
@@ -577,8 +600,6 @@
         if (g.turtles.includes(S.me)) actions += '<span class="small muted">🐢 Your vote counts double.</span>';
       }
     } else if (g.phase === 'over') { label = 'Game over'; text = g.over && g.over.winners.includes(S.me) ? 'You won! 🎉' : 'Better luck next time!'; }
-    const shareable = meAlive && ['dawn', 'day', 'defense', 'vote'].includes(g.phase) ? lastResult(g) : null;
-    if (shareable) actions += `<button class="btn small leaf share-btn" data-a="share">📣 Share last night's result</button>`;
     if (g.myRole === 'turtle' && meAlive && !g.turtles.includes(S.me) && ['day', 'dawn', 'defense', 'vote'].includes(g.phase)) {
       actions += `<button class="btn small lilac" data-a="reveal">🐢 Reveal myself</button>`;
     }
@@ -598,20 +619,6 @@
     else if (a === 'skip') send({ t: 'vote', target: S.game.votes[S.me] === 'skip' ? null : 'skip' });
     else if (a === 'reveal') { if (confirm('Reveal yourself as the Elder Turtle? Everyone will know, and your vote will count double.')) send({ t: 'reveal' }); }
     else if (a === 'role') queueModal(() => showRoleReveal(true));
-    else if (a === 'share') {
-      const r = lastResult(S.game); if (!r) return;
-      if (r.hint) send({ t: 'claim', kind: 'hint', targets: r.hint.group, result: r.hint.yes ? 'sneak' : 'not' });
-      else if (r.saw) r.saw.visitors.forEach((v) => send({ t: 'claim', kind: 'saw', target: v, at: r.saw.house }));
-      ui.shared = ui.shared || new Set(); ui.shared.add(r.key);
-      ui.tab = 'board'; renderTabs(); renderAction(); sound('pop'); toast('Posted to the Board 📣');
-    }
-  }
-  function lastResult(g) {
-    const e = [...g.myLog].reverse().find((l) => (l.hint || (l.saw && l.saw.visitors.length)));
-    if (!e) return null;
-    const key = e.text;
-    if (ui.shared && ui.shared.has(key)) return null;
-    return { ...e, key };
   }
 
   // ----- what you know -----
@@ -651,59 +658,52 @@
     ['board', 'chat', 'notes', 'behind', 'log'].forEach((t) => $(`#tab-${t}`).classList.toggle('hidden', t !== ui.tab));
     renderBoard(); renderChat(); renderNotes(); renderBehind(); renderLog();
   }
+  const STICKERS = [['theory', '🤔', 'Theory'], ['accuse', '🚨', 'Accuse'], ['defend', '🛡️', 'Defend'], ['question', '❓', 'Question']];
+  const STICKER = Object.fromEntries(STICKERS.map(([k, e, l]) => [k, { e, l }]));
   function renderBoard() {
     const g = S.game, meAlive = g.alive.includes(S.me);
     const canPost = meAlive && ['dawn', 'day', 'defense', 'vote'].includes(g.phase);
+    ui.sticker = ui.sticker || 'theory'; ui.tags = (ui.tags || []).filter((id) => g.houses.includes(id));
     const comp = $('#composer');
-    const playerOpts = (list, sel) => list.map((id) => `<option value="${id}" ${sel === id ? 'selected' : ''}>${nm(id)}</option>`).join('');
-    const v = (id) => $(id)?.value;
-    const prev = { role: v('#cp-role'), t1: v('#cp-t1'), t2: v('#cp-t2'), t3: v('#cp-t3'), result: v('#cp-result'), target: v('#cp-target'), at: v('#cp-at') };
-    const others = g.houses.filter((id) => id !== S.me);
-    const kinds = [['hint', '🦉 Hint'], ['saw', '👀 I saw'], ['role', '🎭 My role']];
-    if (!kinds.some(([k]) => k === ui.composer)) ui.composer = 'hint';
-    let fields = '';
-    if (ui.composer === 'role') fields = `<select id="cp-role" aria-label="Role">${Object.entries(ROLES).map(([k, r]) => `<option value="${k}" ${prev.role === k ? 'selected' : ''}>${r.icon} I'm the ${r.name}</option>`).join('')}</select>`;
-    else if (ui.composer === 'hint') {
-      const sel = (idn, cur, blank) => `<select id="${idn}" aria-label="Critter">${blank ? '<option value="">—</option>' : ''}${playerOpts(others, cur)}</select>`;
-      fields = `<span class="small" style="flex-basis:100%;font-weight:800">At least one of…</span>${sel('cp-t1', prev.t1, false)}${sel('cp-t2', prev.t2 ?? '', true)}${sel('cp-t3', prev.t3 ?? '', true)}
-      <select id="cp-result" aria-label="Result"><option value="sneak" ${prev.result === 'sneak' ? 'selected' : ''}>…is a Sneak 🚨</option><option value="not" ${prev.result === 'not' ? 'selected' : ''}>…is NOT a Sneak 🍃</option></select>`;
-    } else fields = `<select id="cp-target" aria-label="Who">${playerOpts(others, prev.target)}</select>
-      <span class="small" style="font-weight:800">visited</span><select id="cp-at" aria-label="Whose house">${playerOpts(g.houses, prev.at)}</select>`;
-    const compKey = [ui.composer, others.join(), g.alive.join(), canPost, S.players.map((p) => p.name).join()].join('|');
+    const draft = $('#cp-text') ? $('#cp-text').value : '';
+    const compKey = [canPost, ui.sticker, ui.tags.join(), g.houses.join(), g.alive.join()].join('|');
     if (ui.compKey !== compKey || !comp.firstChild) {
       ui.compKey = compKey;
-      comp.innerHTML = `<div class="composer-title">Post a card</div><div class="seg" role="tablist">${kinds.map(([k, l]) => `<button data-cp="${k}" class="${ui.composer === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <div class="row">${fields}</div>
-      <div class="row"><button class="btn small primary" data-post ${canPost ? '' : 'disabled'}>Post card</button>
-      <span class="small muted">${canPost ? 'Anyone can post anything. Sneaks lie too!' : meAlive ? 'Cards open at dawn.' : 'Wisps can read but not post.'}</span></div>`;
+      comp.innerHTML = canPost ? `<div class="composer-title">📌 Pin a note</div>
+        <div class="stickers">${STICKERS.map(([k, e, l]) => `<button class="sticker ${ui.sticker === k ? 'on' : ''}" data-st="${k}">${e} ${l}</button>`).join('')}</div>
+        <textarea id="cp-text" maxlength="140" rows="2" placeholder="Theories, hunches, accusations…">${esc(draft)}</textarea>
+        <div class="tagrow"><span class="small" style="font-weight:800">Tag:</span>${g.houses.filter((id) => id !== S.me).map((id) => `<button class="chip ${ui.tags.includes(id) ? 'on' : ''} ${g.alive.includes(id) ? '' : 'gone'}" data-tag="${id}">${nm(id)}</button>`).join('')}</div>
+        <div class="row"><button class="btn small primary" data-post>Pin it</button><span class="small muted" id="cp-count">${draft.length}/140</span></div>`
+        : `<div class="small muted" style="font-weight:700">${meAlive ? '📌 The Board opens at dawn.' : '👻 Wisps can read the Board but not pin notes.'}</div>`;
     }
-    const names = (ids) => { const a = ids.map((x) => `<b>${nm(x)}</b>`); return a.length < 3 ? a.join(' and ') : `${a[0]}, ${a[1]}, and ${a[2]}`; };
-    const card = (c) => {
-      if (c.kind === 'role') return ['', ROLES[c.role]?.icon, `I'm the <b>${ROLES[c.role].name}</b>.`];
-      if (c.kind === 'hint') return c.result === 'sneak' ? ['hint-sneak', '🚨', `At least one of ${names(c.targets)} is a Sneak.`] : ['hint-not', '🍃', `At least one of ${names(c.targets)} is NOT a Sneak.`];
-      if (c.kind === 'saw') return ['saw', '👀', `I saw <b>${nm(c.target)}</b> visit <b>${nm(c.at)}</b>'s house.`];
-      return ['', '🧶', `I suspect <b>${nm(c.target)}</b>.`];
-    };
-    const days = [...new Set(g.claims.map((c) => c.day))].sort((a, b) => b - a);
-    setHTML($('#claim-list'), days.map((d) => `<div class="day-head">Day ${d}</div>` + g.claims.filter((c) => c.day === d).reverse().map((c) => {
-      const [cls, icon, text] = card(c);
-      return `<div class="claim ${cls} ${d < g.day ? 'old' : ''}">${avatar(P(c.by), 'sm')}<div class="body"><b>${nm(c.by)}</b>${g.alive.includes(c.by) ? '' : ' 👻'}<br><span class="kind">${icon}</span> ${text}</div>
-      <div class="react"><button data-react="trust" data-id="${c.id}" class="${c.trust.includes(S.me) ? 'on' : ''}" aria-label="Trust">👍 ${c.trust.length}</button>
-      <button data-react="doubt" data-id="${c.id}" class="${c.doubt.includes(S.me) ? 'on' : ''}" aria-label="Doubt">👎 ${c.doubt.length}</button></div></div>`;
-    }).join('')).join('') || '<div class="empty-hint"><span class="big">📋</span>No cards yet. Owls post hints, Bunnies post sightings, anyone can claim a role.</div>');
+    const days = [...new Set(g.board.map((c) => c.day))].sort((a, b) => b - a);
+    setHTML($('#claim-list'), days.map((d) => `<div class="day-head">Day ${d}</div>` + g.board.filter((c) => c.day === d).reverse().map((c) => {
+      const st = STICKER[c.sticker] || STICKER.theory;
+      return `<div class="note-card ${c.sticker} ${d < g.day ? 'old' : ''}"><div class="note-top">${avatar(P(c.by), 'xs')}<b>${nm(c.by)}</b>${g.alive.includes(c.by) ? '' : ' 👻'}<span class="note-st">${st.e} ${st.l}</span></div>
+        <div class="note-text">${esc(c.text)}</div>
+        ${c.tags.length ? `<div class="note-tags">${c.tags.map((t) => `<span class="tag">${nm(t)}</span>`).join('')}</div>` : ''}
+        <div class="react"><button data-react="trust" data-id="${c.id}" class="${c.trust.includes(S.me) ? 'on' : ''}" aria-label="Agree">👍 ${c.trust.length}</button>
+        <button data-react="doubt" data-id="${c.id}" class="${c.doubt.includes(S.me) ? 'on' : ''}" aria-label="Disagree">👎 ${c.doubt.length}</button></div></div>`;
+    }).join('')).join('') || '<div class="empty-hint"><span class="big">📌</span>Nothing pinned yet. Pin a theory, an accusation, or a question. Anyone can say anything… and Sneaks lie!</div>');
   }
   function onBoardClick(e) {
-    const cp = e.target.closest('[data-cp]');
-    if (cp) { ui.composer = cp.dataset.cp; ui.compKey = null; renderBoard(); return; }
+    const st = e.target.closest('[data-st]');
+    if (st) { ui.sticker = st.dataset.st; ui.compKey = null; renderBoard(); return; }
+    const tg = e.target.closest('[data-tag]');
+    if (tg) {
+      const id = tg.dataset.tag;
+      ui.tags = ui.tags.includes(id) ? ui.tags.filter((x) => x !== id) : [...ui.tags, id].slice(-3);
+      ui.compKey = null; renderBoard(); return;
+    }
     if (e.target.closest('[data-post]')) {
-      if (ui.composer === 'role') send({ t: 'claim', kind: 'role', role: $('#cp-role').value });
-      else if (ui.composer === 'hint') send({ t: 'claim', kind: 'hint', targets: ['#cp-t1', '#cp-t2', '#cp-t3'].map((x) => $(x).value).filter(Boolean), result: $('#cp-result').value });
-      else send({ t: 'claim', kind: 'saw', target: $('#cp-target').value, at: $('#cp-at').value });
-      sound('pop'); return;
+      const i = $('#cp-text'), text = i.value.trim();
+      if (!text) return toast('Write something first ✏️');
+      send({ t: 'post', sticker: ui.sticker, text, tags: ui.tags });
+      i.value = ''; ui.tags = []; ui.compKey = null; sound('pop'); renderBoard(); return;
     }
     const r = e.target.closest('[data-react]');
     if (r) {
-      const c = S.game.claims.find((x) => String(x.id) === r.dataset.id);
+      const c = S.game.board.find((x) => String(x.id) === r.dataset.id);
       const on = c && c[r.dataset.react].includes(S.me);
       send({ t: 'react', id: Number(r.dataset.id), v: on ? null : r.dataset.react });
     }

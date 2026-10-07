@@ -19,15 +19,15 @@ const isSneakTeam = (role) => ROLES[role] && ROLES[role].team === 'sneaks';
 
 // ---- Composition rules ----
 // - Villagers have no ability and are always the most common role.
-// - Owls: 1 under 13 players, 2 at 13+.
+// - Owls: 1 under 9 players, 2 at 9+.
 // - Sneaks: up to 3, each a different type (Sneak, Trickster, Shadow Mole), picked at random.
 // - Every other role appears at most once.
 const SNEAK_TYPES = ['sneak', 'trickster', 'mole'];
-function sneakCount(n) { if (n <= 8) return 1; if (n <= 12) return 2; return 3; }
-const owlCount = (n) => (n >= 13 ? 2 : 1);
+function sneakCount(n) { if (n <= 8) return 1; if (n <= 13) return 2; return 3; }
+const owlCount = (n) => (n >= 9 ? 2 : 1);
 // Village roles besides the Owl(s), by player count (tuned with simulations)
 function extraPowerRange(n) {
-  const table = { 4: [0, 0], 5: [0, 1], 6: [1, 2], 7: [1, 1], 8: [0, 1], 9: [3, 3], 10: [2, 3], 11: [2, 3], 12: [2, 3], 13: [3, 4], 14: [3, 4] };
+  const table = { 4: [0, 0], 5: [1, 1], 6: [1, 2], 7: [0, 0], 8: [0, 1], 9: [2, 3], 10: [3, 3], 11: [2, 3], 12: [2, 3], 13: [0, 0], 14: [4, 4] };
   return table[n] || [3, 4];
 }
 function soloRange(n, spice) {
@@ -35,7 +35,7 @@ function soloRange(n, spice) {
   if (n <= 9) return [0, 1];
   return [1, 1];
 }
-const POOLS = { cozy: ['hedgehog', 'bunny'], classic: ['hedgehog', 'bunny', 'turtle', 'lantern'], chaos: ['hedgehog', 'bunny', 'turtle', 'lantern'] };
+const POOLS = { cozy: ['hedgehog', 'bunny', 'lantern'], classic: ['hedgehog', 'bunny', 'turtle', 'lantern'], chaos: ['hedgehog', 'bunny', 'turtle', 'lantern'] };
 
 const rint = (a, b, rng) => a + Math.floor(rng() * (b - a + 1));
 const pick = (arr, rng = Math.random) => arr[Math.floor(rng() * arr.length)];

@@ -69,15 +69,17 @@
         ready: () => st.guessed,
       },
       { // 4
-        say: () => st.posted.size < 3 ? 'Now share what you know on the <b>Board</b>. Cards look the same in every language, so anyone in the world can follow along. Post all three cards. (Sneaks can post fake hint cards too!)'
-          : 'Look, Mochi and Pip trust your cards. Bramble does not look happy…',
+        say: () => st.posted.has('note') ? 'Perfect. The village is looking at Bramble now, and nobody knows you\'re the Owl. Bramble does not look happy… 😤'
+          : st.posted.has('owl') ? "Whoa, careful! Shout that and every Sneak knows who to spirit away tonight. In Hush Hollow you never <i>have</i> to reveal your role. Try a sneakier way."
+          : 'Time to talk! You <b>could</b> announce you\'re the Owl… but the Sneaks are listening. Pin a note on the <b>Board</b> instead. Write anything you like: theories, accusations, questions. Anyone can lie, so stay sharp. Pick one:',
         scene: () => {
-          const cards = [['owl', '🦉 I\'m the Owl.'], ['pip', '🚨 At least one of Pip, Bramble, and Fig is a Sneak.'], ['bramble', '🚨 At least one of Bramble, Mochi, and Clover is a Sneak.']];
-          return `<div class="row" style="justify-content:center">${cards.map(([k, l]) => `<button class="btn small ${st.posted.has(k) ? 'on' : ''}" data-post="${k}" ${st.posted.has(k) ? 'disabled' : ''}>${l}</button>`).join('')}</div>
-            <div style="display:flex;flex-direction:column;gap:.4rem;margin-top:.7rem">${cards.filter(([k]) => st.posted.has(k)).map(([, l]) => `<div class="claim">${avatar(you, 'sm')}<div class="body"><b>${esc(you.name)}</b><br>${l}</div>
-              <div class="react"><button>👍 ${st.posted.size === 3 ? 2 : 1}</button><button>👎 ${st.posted.size === 3 ? 1 : 0}</button></div></div>`).join('')}</div>`;
+          const opts = [['owl', '🦉 "I\'m the Owl! Listen to me!"'], ['note', '🚨 "Not saying how I know, but Bramble was out late the night Clover vanished 👀"']];
+          return `<div style="display:flex;flex-direction:column;gap:.5rem;align-items:center">${opts.map(([k, l]) => `<button class="btn small ${st.posted.has(k) && k === 'note' ? 'on' : ''}" data-post="${k}" ${st.posted.has('note') ? 'disabled' : ''} style="white-space:normal">${l}</button>`).join('')}</div>
+            ${st.posted.has('note') ? `<div class="note-card accuse" style="margin-top:1.1rem"><div class="note-top">${avatar(you, 'xs')}<b>${esc(you.name)}</b><span class="note-st">🚨 Accuse</span></div>
+              <div class="note-text">Not saying how I know, but Bramble was out late the night Clover vanished 👀</div><div class="note-tags"><span class="tag">Bramble</span></div>
+              <div class="react"><button>👍 2</button><button>👎 1</button></div></div>` : ''}`;
         },
-        ready: () => st.posted.size === 3,
+        ready: () => st.posted.has('note'),
       },
       { // 5
         say: () => !st.voted ? 'Time to vote! Tap the house of the critter you want to send into the Pond. Everyone can see who votes for whom.'

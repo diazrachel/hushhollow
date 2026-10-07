@@ -11,6 +11,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <script>
+    // Pick light/dark before the page paints, so there's no white flash
+    (function () {
+      var t = 'auto';
+      try { t = (JSON.parse(localStorage.getItem('hh-profile') || '{}').theme) || 'auto'; } catch (e) {}
+      var dark = t === 'dark' || (t === 'auto' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
 </head>
 <body class="phase-home">
   <div id="sky" aria-hidden="true"><div class="stars"></div></div>
@@ -73,7 +82,7 @@
       </div>
     </section>
     <footer class="home-foot">
-      <button class="link" id="settings-btn">⚙️ Settings and carry code</button>
+      <span class="row" style="gap:1rem"><button class="link" id="settings-btn">⚙️ Settings and carry code</button><button class="link" id="home-theme-btn">🌙 Dark mode</button></span>
       <span>Made with 🍄 in the Hollow</span>
     </footer>
   </main>
@@ -94,6 +103,7 @@
       </div>
       <div class="hud-right">
         <button id="role-chip" class="role-chip" aria-label="Open my role card"></button>
+        <button class="icon-btn theme-btn" id="g-theme-btn" title="Light or dark mode" aria-label="Toggle dark mode">🌙</button>
         <button class="icon-btn" id="sound-btn" title="Sound" aria-label="Toggle sound">🔔</button>
         <button class="icon-btn" id="g-handbook-btn" title="How to play" aria-label="How to play">❔</button>
         <button class="icon-btn" id="leave-btn" title="Leave game" aria-label="Leave game">🚪</button>

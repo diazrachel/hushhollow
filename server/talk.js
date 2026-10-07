@@ -164,25 +164,25 @@ function ruleReply(room, p, msg, ch) {
   if (/\b(thanks|thank you|ty)\b/.test(text)) return pick(T.thanks);
   if (mentionsMe && /(sus|sneak|liar|lying|vote|it'?s you|guilty|did it|suspicious|imposter|mafia|killer|evil|watching|eye on|suspect|look at)/.test(text)) {
     if (role === 'frog') return pick(T.defendFrog);
-    return fill(pick(T.defend), { ...v, r: roleLine(claimed) });
+    return fill(pick(T.defend), { ...v, r: claimed === 'villager' || AI.mem(g, me).claimedRole ? roleLine(claimed) : 'on your side' });
   }
   if (/(role|who are you|what are you|are you (a|an|the)\b)/.test(text)) {
     const M = AI.mem(g, me);
-    const willClaim = sneak || role === 'villager' || role === 'moth' || role === 'frog' || M.claimedRole || g.day >= 3 || g.turtles.has(me);
+    const willClaim = sneak || role === 'villager' || role === 'moth' || role === 'frog' || M.claimedRole || g.turtles.has(me) || (mentionsMe && Math.random() < 0.15);
     if (!willClaim) return pick(T.hedge);
-    if (!M.claimedRole) { M.claimedRole = true; room.act(me, { t: 'claim', kind: 'role', role: claimed }); }
+    M.claimedRole = true;
     return pick([`I'm ${roleLine(claimed)} ${ICONS[claimed]}`, `${roleLine(claimed)}. promise.`, `${roleLine(claimed)} ${ICONS[claimed]} why?`]);
   }
   if (/(learn|see|saw|info|hint|result|find|found|check|watch|peek|last night|what happened)/.test(text)) {
     if (sneak) {
       const cover = coverRole(g, p);
       const pool = [...g.alive].filter((x) => x !== me && !isSneakTeam(g.roles[x]));
-      if (cover === 'owl' && pool.length >= 2 && g.day >= 2) return `Owl here 🦉 at least one of ${listNames(room, shuffle(pool).slice(0, 3))} is a Sneak`;
+      if (cover === 'owl' && pool.length >= 2 && g.day >= 2) return `not saying how I know 🤫 but at least one of ${listNames(room, shuffle(pool).slice(0, 3))} is a Sneak`;
       if (cover === 'hedgehog' && pool.length && g.day >= 2) return `I protected ${room.name(pick(pool))} last night 🦔`;
       return pick(["I'm just a villager, I slept all night 😴", 'no info, villager life 🏡', 'nothing, I was asleep']);
     }
     const h = lastHint(g, me), sw = lastSaw(g, me), pk = lastPeek(g, me);
-    if (h && (g.day >= 2 || AI.mem(g, me).claimedRole)) return `Owl here 🦉 at least one of ${listNames(room, h.hint.group)} ${h.hint.yes ? 'is a Sneak' : 'is NOT a Sneak'}`;
+    if (h && h.hint.yes && Math.random() < 0.5) return `not saying how I know 🤫 but at least one of ${listNames(room, h.hint.group)} is a Sneak`;
     if (sw) return sw.saw.visitors.length ? `I saw ${listNames(room, sw.saw.visitors)} at ${room.name(sw.saw.house)}'s house 👀` : `I watched ${room.name(sw.saw.house)}'s house, nobody came`;
     if (pk) return `I peeked at ${room.name(pk.peek.house)}'s house: ${pk.peek.count === 0 ? 'nobody else visited' : `${pk.peek.count} visitor${pk.peek.count > 1 ? 's' : ''}`}`;
     if (h) return pick(T.hedge);
@@ -221,19 +221,13 @@ async function llmReply(room, p, msg, ch) {
   const t = topOf(s, (id) => id !== msg.by);
   const priv = (g.priv[me] || []).filter((e) => /^Night/.test(e.text)).map((e) => `- ${e.text}`).slice(-8).join('\n') || '- nothing yet';
   const deaths = g.deaths.map((d) => `- ${room.name(d.id)} (${d.how === 'pond' ? `voted into the Pond day ${d.day}` : `vanished night ${d.day}`}). Notepad: ${(g.notes[d.id] || []).map((n) => n.text).join(' | ') || 'empty'}`).join('\n') || '- nobody yet';
-  const board = g.claims.slice(-14).map((c) => {
-    const by = room.name(c.by);
-    if (c.kind === 'role') return `- ${by}: "I'm the ${ROLES[c.role].name}"`;
-    if (c.kind === 'hint') return `- ${by}: "At least one of ${listNames(room, c.targets)} ${c.result === 'sneak' ? 'is a Sneak' : 'is NOT a Sneak'}"`;
-    if (c.kind === 'saw') return `- ${by}: "I saw ${room.name(c.target)} visit ${room.name(c.at)}'s house"`;
-    return `- ${by}: "I suspect ${room.name(c.target)}"`;
-  }).join('\n') || '- no cards yet';
+  const board = g.board.slice(-12).map((c) => `- ${room.name(c.by)} pinned (${c.sticker}): ${c.text}`).join('\n') || '- nothing pinned yet';
   const chatLog = (g.chat[ch] || []).slice(-14).map((m) => `${room.name(m.by)}: ${m.text}`).join('\n');
   const alive = [...g.alive].map((id) => room.name(id) + (id === me ? ' (you)' : '')).join(', ');
   const secret = sneak
     ? `You are secretly on the SNEAK team. ${team.length ? `Teammates: ${team.map((x) => room.name(x)).join(', ')}. Never reveal them.` : ''} Lie convincingly. Your cover story is that you are ${roleLine(coverRole(g, p))}. Never admit to being a Sneak.`
     : role === 'frog' ? 'You are the Pond Frog: you WANT to be voted out, so act a tiny bit suspicious without being obvious.'
-    : 'You are honest, but you may keep your exact role secret if revealing it would make you a target.';
+    : 'You are on the village side. This is a bluffing game like Mafia: keep your exact role secret (revealing it makes you a Sneak target). You may share info vaguely ("not saying how I know…"). Only reveal your role if you are about to be voted out.';
   const system = [
     `You are ${p.name}, a cute ${p.critter} in "Hush Hollow", a cozy social deduction game like Mafia or Werewolf.`,
     `Personality: ${persona(g, me)}.`,
@@ -247,7 +241,7 @@ async function llmReply(room, p, msg, ch) {
     `Phase: ${g.phase}, day ${g.day}. Alive: ${alive}.`,
     `What you privately learned:\n${priv}`,
     `Gone:\n${deaths}`,
-    `Board cards:\n${board}`,
+    `Board notes:\n${board}`,
     t ? `Your current top suspect: ${room.name(t)} (${reasonFor(room, p, t)}).` : '',
     `Recent ${ch === 'den' ? 'Sneak Den' : 'village'} chat:\n${chatLog}`,
     `${room.name(msg.by)} just said: ${msg.text}`,

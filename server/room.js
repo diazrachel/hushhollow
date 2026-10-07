@@ -6,6 +6,8 @@ const { ROLES, isSneakTeam, generateSetup, shuffle, pick } = require('./roles');
 const { clean, cleanName } = require('./filter');
 const AI = require('./ai');
 const Talk = require('./talk');
+const Hear = require('./hear');
+const STICKERS = ['theory', 'accuse', 'defend', 'question'];
 
 const HATS = ['none', 'bow', 'flower', 'crown', 'cap', 'tophat', 'mushroom', 'sprout'];
 const CRITTERS = ['mouse', 'hamster', 'frog', 'duck', 'bunny', 'cat', 'fox', 'raccoon', 'bear', 'panda', 'pig', 'koala'];
@@ -158,7 +160,7 @@ class Room {
     if (!g || g.phase === 'over') return;
     switch (m.t) {
       case 'night': return this.nightAction(p, m);
-      case 'claim': return this.claim(p, m);
+      case 'post': return this.post(p, m);
       case 'react': return this.react(p, m);
       case 'yarn': return this.setYarn(p, m);
       case 'ready': return this.setReady(p);
@@ -187,6 +189,7 @@ class Room {
     else if (g.phase === 'night') return; // the village sleeps at night
     else ch = 'day';
     g.chat[ch].push(msg); g.chat[ch] = g.chat[ch].slice(-100);
+    if (ch === 'day') Hear.hear(this, p.id, text);
     this.changed();
     try { Talk.onChat(this, msg, ch); } catch (e) { console.error('[talk]', e); }
   }
@@ -211,12 +214,12 @@ class Room {
     }
     const order = shuffle(this.players.map((p) => p.id));
     const g = this.game = {
-      n, phase: 'night', day: 1, settling: true, endsAt: 0, roles: {}, alive: new Set(order), houses: order,
-      lit: new Set(), litNext: new Set(), log: [], priv: {}, notes: {}, claims: [], yarn: {},
+      n, phase: 'night', day: 1, settling: n !== 7, endsAt: 0, roles: {}, alive: new Set(order), houses: order,
+      lit: new Set(), litNext: new Set(), log: [], priv: {}, notes: {}, claims: [], board: [], boardSeq: 1, yarn: {},
       actions: {}, sneakVotes: {}, meddles: {}, owlPending: [], lastProtect: {}, lastLight: {}, lastMeddle: {},
       turtles: new Set(), ready: new Set(), noms: {}, nominees: [], votes: {}, defenseIdx: 0, history: [], deaths: [],
       chat: { day: [], den: [], wisp: [] }, ai: {}, soloWins: new Set(), winner: null, winnerIds: new Set(),
-      settleLeft: n === 4 ? 2 : 1, claimSeq: 1, eventSeq: 1, events: [], bigGame: n >= 12,
+      settleLeft: [4, 9, 14].includes(n) ? 2 : n === 7 ? 0 : 1, claimSeq: 1, eventSeq: 1, events: [], bigGame: n >= 12,
     };
     this.players.forEach((p, i) => { g.roles[p.id] = roles[i]; g.priv[p.id] = []; g.notes[p.id] = []; });
     const team = order.filter((id) => isSneakTeam(g.roles[id]));
@@ -228,7 +231,7 @@ class Room {
       }
     }
     this.autoStartAt = null;
-    this.log(`Night falls on Hush Hollow. ${n} critters, ${team.length} of them secretly Sneaks. It's a settling-in night, so nobody will be spirited away.`);
+    this.log(`Night falls on Hush Hollow. ${n} critters, ${team.length} of them secretly Sneaks. ${g.settling ? "It's a settling-in night, so nobody will be spirited away." : 'Careful: the Sneaks can strike tonight!'}`);
     this.startNight();
     return true;
   }
@@ -440,7 +443,7 @@ class Room {
     else if (rec.saved) this.log('Dawn. Everyone is safe. Someone was protected in the night!');
     else this.log('Dawn. Everyone woke up safe.');
     if (g.litNext.size) this.log(`A lantern was hung at ${[...g.litNext].map((x) => `${this.name(x)}'s house`).join(' and ')}. It glows tonight.`);
-    g.settleLeft = (g.settleLeft || 1) - 1;
+    g.settleLeft = Math.max(0, (g.settleLeft || 0) - 1);
     g.settling = g.settleLeft > 0;
     if (this.checkWin()) return;
     this.setPhase('dawn', BASE.dawn * this.mult(), () => this.startDay());
@@ -533,29 +536,22 @@ class Room {
 
   // ---------- day actions ----------
   dayPhase() { return ['day', 'defense', 'vote', 'dawn'].includes(this.game.phase); }
-  claim(p, m) {
+  // Board: a free sticky-note wall. Notes are in players' own words; nothing forces a role reveal.
+  post(p, m) {
     const g = this.game;
     if (!g.alive.has(p.id) || !this.dayPhase()) return;
-    if (g.claims.filter((c) => c.by === p.id && c.day === g.day).length >= 6) return;
-    const c = { id: g.claimSeq++, by: p.id, day: g.day, kind: m.kind, trust: [], doubt: [] };
-    if (m.kind === 'role') { if (!ROLES[m.role]) return; c.role = m.role; }
-    else if (m.kind === 'hint') {
-      const t = [...new Set(Array.isArray(m.targets) ? m.targets : [])].filter((x) => this.get(x) && x !== p.id).slice(0, 3);
-      if (!t.length || !['sneak', 'not'].includes(m.result)) return;
-      c.targets = t; c.result = m.result;
-    } else if (m.kind === 'saw') {
-      if (!this.get(m.target) || !this.get(m.at) || m.target === m.at) return;
-      c.target = m.target; c.at = m.at;
-    } else if (m.kind === 'accuse') {
-      if (!g.alive.has(m.target) || m.target === p.id) return;
-      c.target = m.target;
-    } else return;
-    g.claims.push(c);
+    if (g.board.filter((c) => c.by === p.id && c.day === g.day).length >= 5) return;
+    const text = clean(String(m.text || '').replace(/\s+/g, ' ').trim().slice(0, 140));
+    if (!text) return;
+    const sticker = STICKERS.includes(m.sticker) ? m.sticker : 'theory';
+    const tags = [...new Set(Array.isArray(m.tags) ? m.tags : [])].filter((x) => this.get(x)).slice(0, 3);
+    g.board.push({ id: g.boardSeq++, by: p.id, day: g.day, sticker, text, tags, trust: [], doubt: [] });
+    Hear.hear(this, p.id, text + (sticker === 'accuse' && tags.length ? ` suspect ${tags.map((x) => this.name(x)).join(' ')}` : ''));
     this.changed();
   }
   react(p, m) {
     const g = this.game;
-    const c = g.claims.find((x) => x.id === Number(m.id));
+    const c = g.board.find((x) => x.id === Number(m.id));
     if (!c || !g.alive.has(p.id) || c.by === p.id) return;
     c.trust = c.trust.filter((x) => x !== p.id); c.doubt = c.doubt.filter((x) => x !== p.id);
     if (m.v === 'trust') c.trust.push(p.id); else if (m.v === 'doubt') c.doubt.push(p.id);
@@ -631,7 +627,7 @@ class Room {
       lit: [...(g.phase === 'night' ? g.lit : g.litNext)],
       log: g.log.slice(-100),
       deaths: g.deaths.map((d) => ({ ...d, notes: g.notes[d.id] })),
-      claims: g.claims, yarn: g.yarn, noms: g.noms, nominees: g.nominees, defenseIdx: g.defenseIdx,
+      board: g.board, yarn: g.yarn, noms: g.noms, nominees: g.nominees, defenseIdx: g.defenseIdx,
       votes: g.votes, readyCount: g.ready.size, turtles: [...g.turtles], events: g.events.slice(-6),
       myRole: role, myLog: g.priv[pid] || [], myNotes: g.notes[pid] || [],
       myAction: g.actions[pid] || null, mySneakVote: g.sneakVotes[pid] || null,
