@@ -2,7 +2,7 @@
 // Everything secret lives here; clients only ever receive view(playerId).
 
 const crypto = require('crypto');
-const { ROLES, isSneakTeam, generateSetup, shuffle, pick } = require('./roles');
+const { ROLES, isSneakTeam, generateSetup, shuffle, pick, clearChance, sceneClues, exactSize } = require('./roles');
 const { clean, cleanName } = require('./filter');
 const AI = require('./ai');
 const Talk = require('./talk');
@@ -12,6 +12,8 @@ const STICKERS = ['theory', 'accuse', 'defend', 'question'];
 const HATS = ['none', 'bow', 'flower', 'crown', 'cap', 'tophat', 'mushroom', 'sprout'];
 const CRITTERS = ['mouse', 'hamster', 'frog', 'duck', 'bunny', 'cat', 'fox', 'raccoon', 'bear', 'panda', 'pig', 'koala'];
 const COLORS = ['berry', 'honey', 'sky', 'mint', 'lilac', 'peach', 'moss', 'cocoa'];
+const { SIZE, FUR, PLACES } = require('./world');
+const placeCount = (n) => (n <= 5 ? 3 : n <= 8 ? 4 : n <= 10 ? 5 : 6);
 const EMOTES = ['🤔', '👀', '😤', '🙏', '😂', '❤️', '😱', '🤫'];
 const AI_NAMES = ['Mochi', 'Pip', 'Biscuit', 'Clover', 'Pebble', 'Juniper', 'Nutmeg', 'Wren', 'Fig', 'Tofu',
   'Bramble', 'Sprig', 'Maple', 'Puddle', 'Thimble', 'Acorn', 'Bean', 'Willow', 'Hazel', 'Dumpling'];
@@ -219,7 +221,7 @@ class Room {
       actions: {}, sneakVotes: {}, meddles: {}, owlPending: [], lastProtect: {}, lastLight: {}, lastMeddle: {},
       turtles: new Set(), ready: new Set(), noms: {}, nominees: [], votes: {}, defenseIdx: 0, history: [], deaths: [],
       chat: { day: [], den: [], wisp: [] }, ai: {}, soloWins: new Set(), winner: null, winnerIds: new Set(),
-      settleLeft: [4, 9, 14].includes(n) ? 2 : n === 7 ? 0 : 1, claimSeq: 1, eventSeq: 1, events: [], bigGame: n >= 12,
+      settleLeft: [4, 8, 12, 13, 14].includes(n) ? 2 : n === 7 ? 0 : 1, walks: {}, scenes: [], places: shuffle(Object.keys(PLACES)).slice(0, placeCount(n)), claimSeq: 1, eventSeq: 1, events: [], bigGame: n >= 12,
     };
     this.players.forEach((p, i) => { g.roles[p.id] = roles[i]; g.priv[p.id] = []; g.notes[p.id] = []; });
     const team = order.filter((id) => isSneakTeam(g.roles[id]));
@@ -288,7 +290,7 @@ class Room {
 
   startNight() {
     const g = this.game;
-    g.actions = {}; g.sneakVotes = {}; g.meddles = {};
+    g.actions = {}; g.sneakVotes = {}; g.meddles = {}; g.walks = {};
     g.lit = g.litNext; g.litNext = new Set();
     g.ready = new Set(); g.votes = {}; g.noms = {}; g.nominees = [];
     this.setPhase('night', (g.settling ? BASE.settle : BASE.night) * this.mult(), () => this.endNight());
@@ -297,6 +299,7 @@ class Room {
 
   needsNightAction(id) {
     const g = this.game, r = g.roles[id];
+    if (!(id in g.walks)) return true; // everyone takes a night walk (or stays home)
     if (isSneakTeam(r)) return !g.settling && !(id in g.sneakVotes);
     if (!ROLES[r].night) return false; // Villagers and other no-ability roles just sleep
     return !(id in g.actions);
@@ -307,6 +310,11 @@ class Room {
     if (g.phase !== 'night' || !g.alive.has(p.id)) return;
     const t = m.target;
     const role = g.roles[p.id];
+    if (m.kind === 'walk') {
+      if (m.place !== 'home' && !g.places.includes(m.place)) return;
+      g.walks[p.id] = m.place;
+      return this.afterNightAction();
+    }
     if (m.kind === 'meddle') {
       if (role !== 'trickster') return;
       if (!t) { delete g.meddles[p.id]; return this.changed(); }
@@ -405,7 +413,7 @@ class Room {
         }
         const names = listNames(shown.map((x) => this.name(x)));
         const text = `Night ${night}: you watched ${tn}. ${yes ? `At least one of ${names} is a Sneak.` : `At least one of ${names} is NOT a Sneak.`}`;
-        if (g.n <= 8) { g.owlPending.push({ to: id, text, hint: { group: shown, yes }, at: night + 1 }); this.priv(id, `Night ${night}: you watched ${tn}. In a small village the answer takes a night to arrive.`); }
+        if (g.n <= 8 || g.n === 11) { g.owlPending.push({ to: id, text, hint: { group: shown, yes }, at: night + 1 }); this.priv(id, `Night ${night}: you watched ${tn}. In a small village the answer takes a night to arrive.`); }
         else this.priv(id, text, { hint: { group: shown, yes } });
       } else if (a.kind === 'peek') {
         let c = visitorsTo(a.target, id).length;
@@ -433,13 +441,69 @@ class Room {
     });
     if (rec.saved) [...g.alive].filter((id) => isSneakTeam(g.roles[id])).forEach((id) => this.priv(id, `Night ${night}: ${this.name(victim)} was protected.`));
 
+    // Night walks: who you bumped into (often only vaguely), and whether someone slipped away
+    const killVisit = visits.find((v) => v.kind === 'kill');
+    const culprit = killVisit ? killVisit.from : null;
+    const isMole = culprit && g.roles[culprit] === 'mole';
+    const walkOf = (id) => g.walks[id] || 'home';
+    const describe = (q) => {
+      const pl = this.get(q);
+      return Math.random() < 0.5 ? { size: SIZE[pl.critter], text: `a ${SIZE[pl.critter]} critter` } : { color: FUR[pl.color], text: `someone with ${FUR[pl.color]} fur` };
+    };
+    for (const id of living) {
+      const place = walkOf(id);
+      if (place === 'home' || died.includes(id)) continue;
+      const P0 = PLACES[place];
+      const here = living.filter((q) => q !== id && walkOf(q) === place);
+      let seen = here.map((q) => (Math.random() < clearChance(g.n) ? { id: q, clear: true, text: this.name(q) } : { clear: false, ...describe(q) }));
+      if (meddled.has(id)) {
+        const fake = pick(living.filter((x) => x !== id && !here.includes(x)));
+        if (fake && seen.length && Math.random() < 0.6) seen[Math.floor(Math.random() * seen.length)] = { id: fake, clear: true, text: this.name(fake) };
+        else if (fake) seen.push({ clear: false, ...describe(fake) });
+      }
+      seen = shuffle(seen);
+      const slip = !!culprit && culprit !== id && here.includes(culprit) && !isMole && Math.random() < (g.n === 7 || g.n === 11 ? 0.35 : 0.8);
+      const whoText = seen.length ? `You saw ${listNames(seen.map((x) => x.text))}.` : 'Nobody else was there.';
+      this.priv(id, `Night ${night}: you wandered to the ${P0.name} ${P0.e}. ${whoText}${slip ? ' Partway through the night, someone there slipped away 👀' : ''}`,
+        { walk: { place, night, seen: seen.map((x) => ({ id: x.clear ? x.id : null, size: x.size, color: x.color })), slip } });
+    }
+    // Crime scene: a couple of vague clues about whoever came to the door
+    let scene = null;
+    if (culprit && victim) {
+      const cp = this.get(culprit);
+      if (died.length) {
+        let picked;
+        if (isMole) picked = [['mole', true, 'No pawprints at all… just a pile of fresh dirt by the door 🕳️']];
+        else {
+          const from = walkOf(culprit);
+          const sz = SIZE[cp.critter];
+          const notSz = pick(['small', 'medium', 'large'].filter((x) => x !== sz));
+          const sizeClue = Math.random() < exactSize(g.n) ? ['size', sz, `${cap(sz)} pawprints led up to the door.`]
+            : ['sizeNot', notSz, `Pawprints led up to the door. Whoever it was, they weren't ${notSz}.`];
+          const pool = [sizeClue,
+            ['from', from, from === 'home' ? 'The tracks came from the cottages, as if someone walked straight from home.' : PLACES[from].trace]];
+          if (Math.random() < 0.2) pool.push(['color', FUR[cp.color], `A tuft of ${FUR[cp.color]} fur was caught on the fence.`]);
+          picked = shuffle(pool).slice(0, sceneClues(g.n));
+        }
+        const clues = picked.map((x) => x[2]);
+        scene = { night, victim, clues, facts: Object.fromEntries(picked.map((x) => [x[0], x[1]])) };
+        g.scenes.push(scene);
+        rec.scene = clues;
+      } else if (rec.saved) {
+        this.priv(victim, isMole ? `Night ${night}: you heard digging under your floor… but someone protected you! 🦔`
+          : `Night ${night}: a ${SIZE[cp.critter]} critter crept up to your door, but someone protected you! 🦔`);
+      }
+    }
+    rec.walks = { ...g.walks }; rec.culprit = culprit;
+
     // Deaths
     for (const id of died) this.kill(id, 'night');
-    g.events.push({ id: g.eventSeq++, type: 'dawn', night, died, saved: rec.saved, lit: [...g.litNext] });
+    g.events.push({ id: g.eventSeq++, type: 'dawn', night, died, saved: rec.saved, lit: [...g.litNext], clues: scene ? scene.clues : [] });
 
     rec.visits = visits;
     g.history.push(rec);
     if (died.length) this.log(`Dawn. ${died.map((d) => this.name(d)).join(', ')} was spirited away in the night. Their notepad was left behind.`);
+    if (scene) scene.clues.forEach((c) => this.log(`🔍 At ${this.name(scene.victim)}'s house: ${c}`));
     else if (rec.saved) this.log('Dawn. Everyone is safe. Someone was protected in the night!');
     else this.log('Dawn. Everyone woke up safe.');
     if (g.litNext.size) this.log(`A lantern was hung at ${[...g.litNext].map((x) => `${this.name(x)}'s house`).join(' and ')}. It glows tonight.`);
@@ -630,7 +694,8 @@ class Room {
       board: g.board, yarn: g.yarn, noms: g.noms, nominees: g.nominees, defenseIdx: g.defenseIdx,
       votes: g.votes, readyCount: g.ready.size, turtles: [...g.turtles], events: g.events.slice(-6),
       myRole: role, myLog: g.priv[pid] || [], myNotes: g.notes[pid] || [],
-      myAction: g.actions[pid] || null, mySneakVote: g.sneakVotes[pid] || null,
+      myAction: g.actions[pid] || null, mySneakVote: g.sneakVotes[pid] || null, myWalk: g.walks[pid] || null,
+      places: g.places.map((id) => ({ id, name: PLACES[id].name, e: PLACES[id].e })), scenes: g.scenes,
       iReady: g.ready.has(pid), lastProtect: g.lastProtect[pid] || null, lastLight: g.lastLight[pid] || null,
       myMeddle: role === 'trickster' ? g.meddles[pid] || null : null, lastMeddle: role === 'trickster' ? g.lastMeddle[pid] || null : null,
       moleAlive: sneak ? this.moleAlive() : undefined,

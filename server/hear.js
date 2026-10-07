@@ -6,6 +6,7 @@ const ROLE_WORDS = [
   ['lantern keeper', 'lantern'], ['lantern', 'lantern'], ['hedgehog', 'hedgehog'], ['hedgie', 'hedgehog'],
   ['owl', 'owl'], ['villager', 'villager'], ['frog', 'frog'], ['moth', 'moth'],
 ];
+const { PLACES } = require('./world');
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Names mentioned in the text, in the order they appear
@@ -26,6 +27,21 @@ function hear(room, by, text) {
   const names = namesIn(room, text, by);
   const add = (c) => g.claims.push({ id: g.claimSeq++, by, day: g.day, ...c });
   let found = false;
+
+  // Night-walk alibis: "I was at the Bakery", "I stayed home" (+ "saw Pip there")
+  const home = /\b(stayed home|was home|at home|stayed in|in my house|in bed)\b/.test(low);
+  let place = null;
+  for (const id of g.places || []) {
+    const w = PLACES[id].name.toLowerCase();
+    if (low.includes(w) || (id === 'well' && /\bwell\b/.test(low))) { place = id; break; }
+  }
+  const self = /\b(i was|i went|i wandered|i walked|i stayed|i'?m at|went to|walked to|wandered to)\b/.test(low);
+  if (home && self) { add({ kind: 'at', place: 'home', night: g.day }); return; }
+  if (place) {
+    if (self) add({ kind: 'at', place, night: g.day });
+    if (names.length && /\b(saw|seen|spotted|with|bumped)\b/.test(low)) add({ kind: 'seenAt', targets: names.slice(0, 3), place, night: g.day });
+    if (self || names.length) return;
+  }
 
   // "I'm the Owl", "owl here", "I'm a villager"
   const rm = /\b(?:i'?m|i am|im)\s+(?:a|an|the|actually|really|just)?\s*(?:a |an |the )?([a-z ]{3,16})/.exec(low) || /\b([a-z ]{3,14}) here\b/.exec(low);

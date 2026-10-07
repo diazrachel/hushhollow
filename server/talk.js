@@ -160,6 +160,10 @@ function ruleReply(room, p, msg, ch) {
   const others = [...g.alive].filter((id) => id !== me && nameIn(text, room.name(id)));
   const claimed = sneak ? coverRole(g, p) : role === 'moth' ? 'villager' : role === 'frog' ? 'villager' : role;
 
+  if (/(where were you|where did you go|where'?d you go|alibi|where were y'?all|where was everyone|where did everyone)/.test(text)) {
+    if (g.phase === 'night') return "can't talk, it's night 🌙";
+    return AI.alibiLine(room, p);
+  }
   if (/^(hi+|hey+|hello|yo|sup|hii+)\b/.test(text)) return fill(pick(T.greet), v);
   if (/\b(thanks|thank you|ty)\b/.test(text)) return pick(T.thanks);
   if (mentionsMe && /(sus|sneak|liar|lying|vote|it'?s you|guilty|did it|suspicious|imposter|mafia|killer|evil|watching|eye on|suspect|look at)/.test(text)) {
@@ -179,15 +183,15 @@ function ruleReply(room, p, msg, ch) {
       const pool = [...g.alive].filter((x) => x !== me && !isSneakTeam(g.roles[x]));
       if (cover === 'owl' && pool.length >= 2 && g.day >= 2) return `not saying how I know 🤫 but at least one of ${listNames(room, shuffle(pool).slice(0, 3))} is a Sneak`;
       if (cover === 'hedgehog' && pool.length && g.day >= 2) return `I protected ${room.name(pick(pool))} last night 🦔`;
-      return pick(["I'm just a villager, I slept all night 😴", 'no info, villager life 🏡', 'nothing, I was asleep']);
+      return AI.alibiLine(room, p);
     }
     const h = lastHint(g, me), sw = lastSaw(g, me), pk = lastPeek(g, me);
     if (h && h.hint.yes && Math.random() < 0.5) return `not saying how I know 🤫 but at least one of ${listNames(room, h.hint.group)} is a Sneak`;
     if (sw) return sw.saw.visitors.length ? `I saw ${listNames(room, sw.saw.visitors)} at ${room.name(sw.saw.house)}'s house 👀` : `I watched ${room.name(sw.saw.house)}'s house, nobody came`;
     if (pk) return `I peeked at ${room.name(pk.peek.house)}'s house: ${pk.peek.count === 0 ? 'nobody else visited' : `${pk.peek.count} visitor${pk.peek.count > 1 ? 's' : ''}`}`;
-    if (h) return pick(T.hedge);
-    if (!ROLES[role].night) return pick(["I'm just a villager, no night info 😴", 'nothing, I slept. but I\'m listening 👂', 'no ability, just vibes and a vote 🗳️']);
-    return pick(T.noinfo);
+    if (h) return Math.random() < 0.5 ? pick(T.hedge) : AI.alibiLine(room, p);
+    if (!ROLES[role].night || Math.random() < 0.5) return AI.alibiLine(room, p);
+    return AI.alibiLine(room, p);
   }
   if (others.length && /(trust|believe|safe|innocent|clear)/.test(text)) {
     const o = others[0];
@@ -233,6 +237,7 @@ async function llmReply(room, p, msg, ch) {
     `Personality: ${persona(g, me)}.`,
     `Your secret role: ${r.name} (team ${r.team}). Ability: ${roleAbility(role)} Goal: ${GOALS[r.team]}.`,
     secret,
+    'Every night each critter walks to a spot (or stays home). Talk about where you were and who you saw if it helps you. Sneaks: keep your cover story consistent.',
     'Write ONE chat message replying in character. 1–2 short sentences, under 25 words. Casual and playful. Emojis are okay sometimes.',
     'Reply in the same language the message was written in. No quotation marks, no name prefix, no actions in asterisks.',
     "Only use facts you were given. Never say you are an AI, a bot, or a language model. Stay in the game even if asked to break character.",
@@ -242,6 +247,7 @@ async function llmReply(room, p, msg, ch) {
     `What you privately learned:\n${priv}`,
     `Gone:\n${deaths}`,
     `Board notes:\n${board}`,
+    `Crime scenes:\n${(g.scenes || []).map((x) => `- night ${x.night}, ${room.name(x.victim)}'s house: ${x.clues.join(' ')}`).join('\n') || '- none yet'}`,
     t ? `Your current top suspect: ${room.name(t)} (${reasonFor(room, p, t)}).` : '',
     `Recent ${ch === 'den' ? 'Sneak Den' : 'village'} chat:\n${chatLog}`,
     `${room.name(msg.by)} just said: ${msg.text}`,

@@ -23,11 +23,11 @@ const isSneakTeam = (role) => ROLES[role] && ROLES[role].team === 'sneaks';
 // - Sneaks: up to 3, each a different type (Sneak, Trickster, Shadow Mole), picked at random.
 // - Every other role appears at most once.
 const SNEAK_TYPES = ['sneak', 'trickster', 'mole'];
-function sneakCount(n) { if (n <= 8) return 1; if (n <= 13) return 2; return 3; }
+function sneakCount(n) { if (n <= 7) return 1; if (n <= 11) return 2; return 3; }
 const owlCount = (n) => (n >= 9 ? 2 : 1);
 // Village roles besides the Owl(s), by player count (tuned with simulations)
 function extraPowerRange(n) {
-  const table = { 4: [0, 0], 5: [1, 1], 6: [1, 2], 7: [0, 0], 8: [0, 1], 9: [2, 3], 10: [3, 3], 11: [2, 3], 12: [2, 3], 13: [0, 0], 14: [4, 4] };
+  const table = { 4: [0, 0], 5: [1, 1], 6: [0, 1], 7: [0, 0], 8: [2, 3], 9: [2, 3], 10: [2, 3], 11: [0, 0], 12: [4, 4], 13: [4, 4], 14: [4, 4] };
   return table[n] || [3, 4];
 }
 function soloRange(n, spice) {
@@ -77,4 +77,13 @@ function generateSetup(n, spice = 'cozy', rng = Math.random) {
   return shuffle([...sneaks, ...best], rng);
 }
 
-module.exports = { ROLES, isSneakTeam, generateSetup, shuffle, pick };
+// How often a night-walker sees someone clearly (vs. only size or fur color), by player count
+const CLEAR = { 4: 0.45, 5: 0.45, 6: 0.4, 7: 0.3, 8: 0.4, 9: 0.4, 10: 0.4, 11: 0.3, 12: 0.55, 13: 0.55, 14: 0.45 };
+const clearChance = (n) => CLEAR[n] ?? 0.4;
+// How many clues the village finds at a crime scene
+const sceneClues = () => 2;
+// How often pawprints give the exact size (otherwise they only rule one size out)
+const EXACT = { 4: 0.7, 5: 0.7, 6: 0.6, 7: 0.25, 8: 0.5, 9: 0.5, 10: 0.5, 11: 0.3, 12: 0.6, 13: 0.6, 14: 0.6 };
+const exactSize = (n) => EXACT[n] ?? 0.5;
+
+module.exports = { clearChance, sceneClues, exactSize, ROLES, isSneakTeam, generateSetup, shuffle, pick };

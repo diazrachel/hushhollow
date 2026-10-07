@@ -5,6 +5,8 @@ A free, cozy social deduction game you play in the browser. A few critters in th
 - 4 to 14 players, roles auto-balanced for every lobby size
 - Quick Play with strangers (by language), or private burrows with a 4-letter code and share link
 - Add AI critters (Sleepy, Clever, Cunning) to fill any lobby
+- Night walks: every critter wanders somewhere each night and sees who else is out (sometimes only "a large critter"), so everyone has alibis to check
+- Crime scenes: vague public clues (pawprint size, flour from the Bakery, a tuft of fur) whenever someone vanishes
 - Hints, not answers: every info role gets fuzzy information you have to reason about
 - Role reveal cards, phase banners, a morning report, animated vote results, and AI critters that chat
 - Private Notepad that becomes public when you're eliminated (roles are never revealed until the end)
@@ -54,7 +56,8 @@ server/
   roles.js   Roles, point values, and the auto-balancer for 4–14 players
   ai.js      Rule-based AI critters (they use the same actions as humans, no peeking)
   talk.js    AI chat replies: free rule-based brain + optional Claude brain
-  hear.js    Lets AI critters understand what players say in chat and on the Board
+  hear.js    Lets AI critters understand what players say in chat and on the Board (including alibis)
+  world.js   Critter sizes, fur colors, and night-walk spots
   filter.js  Chat and nickname filter
 public/
   index.html, style.css

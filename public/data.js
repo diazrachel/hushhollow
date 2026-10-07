@@ -15,7 +15,7 @@ window.HH = {
 
   ROLES: {
     villager: { name: 'Villager', icon: '🏡', team: 'village', verb: null,
-      ability: "No special ability. You sleep at night, and your power is your voice and your vote. Villagers are the heart of the Hollow!",
+      ability: "No special ability. Like everyone, you take a night walk, and who you bump into can crack the case. Your power is your eyes, your voice, and your vote!",
       tip: 'Ask questions, compare everyone\'s stories, and watch who changes theirs. Sneaks slip up when you push them.' },
     owl: { name: 'Owl', icon: '🦉', team: 'village', verb: 'Watch a critter',
       ability: "Each night, watch one critter. The game adds two random critters and tells you one true thing about the group: either \"at least one is a Sneak\" or \"at least one is NOT a Sneak.\" It never says who. In small villages the answer arrives a night late.",
@@ -52,6 +52,8 @@ window.HH = {
 
   HANDBOOK: {
     rules: [
+      ['🚶', 'Night walks', 'Every night, every critter picks a spot to wander, or stays home. In the morning you learn who you bumped into, sometimes only vaguely ("a large critter"). If a Sneak slipped away to strike, you might notice!'],
+      ['🔍', 'Crime scenes', "When someone vanishes, the village finds a couple of vague clues at their house: pawprint size, something tracked in from a walk spot, a tuft of fur. Match them against everyone's alibis."],
       ['🌙', 'Night', 'Everyone acts in secret. Sneaks pick one critter to spirit away. Village roles investigate, protect, or snoop. The first night is a settling-in night: nobody vanishes.'],
       ['🌅', 'Dawn', 'The village learns who vanished. Their role stays secret, but their Notepad is shared with everyone. Check your Log for what your ability told you.'],
       ['☀️', 'Day', 'Talk it out in Chat, pin notes on the Board, and tie yarn to your suspect. You never have to reveal your role, and anyone can lie. In games of 12 or more, nominate up to 3 suspects first.'],
@@ -62,7 +64,9 @@ window.HH = {
     hints: [
       ['🦉 Owl hints', 'Name three critters (two in tiny games). "At least one is a Sneak" means one or more of them is. "At least one is NOT a Sneak" is fuzzier: the group might still hide a Sneak.'],
       ['🐇 Sightings', 'The Gossip Bunny learns who visited a house. Visitors might be Sneaks, or a Hedgehog protecting, or an Owl watching.'],
-      ['🏡 Villagers', "Villagers have no ability, so a Villager claiming to know something at night is lying. Catch it!"],
+      ['🚶 Alibis', 'Ask everyone where they walked. If someone says "I was at the Mill" and you were at the Mill and saw nobody like them, someone is lying.'],
+      ['🔍 Scene clues', 'Flour means the Sneak came from the Bakery. "Tracks from the cottages" means they stayed home. Pawprint size and fur color narrow it further, but many critters share a size!'],
+      ['🏡 Villagers', "Villagers have no special ability, so a Villager claiming Owl-style info is lying. Catch it!"],
       ['🕳️ Missing visitors', 'A Shadow Mole is invisible to the Gossip Bunny. If someone vanished and nobody saw a visitor, suspect a Mole.'],
       ['🎭 Meddling', 'A Trickster can make one hint slightly wrong each night. Trust patterns across several nights, not a single hint.'],
     ],

@@ -61,11 +61,12 @@
         ready: () => st.noted,
       },
       { // 3
-        say: () => !st.guessed ? "A quiet day passes, then night 2. You watched again: <b>at least one of Bramble, Mochi, and Clover is a Sneak.</b> But at dawn… <b>Clover</b> is gone! Her role stays secret, but her notepad was left behind. Put it all together: who do you suspect most? Tap them."
-          : 'Sharp thinking! Bramble is in BOTH of your "is a Sneak" groups, and Clover saw Bramble out at night. Careful though: honest critters visit houses too. A Hedgehog protecting Pip would look exactly the same.',
+        say: () => !st.guessed ? "Night 2. You watched again, and every critter also took a <b>night walk</b>. At dawn… <b>Clover</b> is gone! The village found clues at her house. Put it all together: your hints, your walk, the scene. Who do you suspect most? Tap them."
+          : "Sharp thinking! Bramble is in BOTH of your hints. The pawprints were large (Bramble's a bear 🐻), the flour came from the Bakery, and someone slipped away from the Bakery while you were there. Clues are hints, not proof, but this one adds up.",
         scene: () => mini(st.guessed ? [] : ['pip', 'bramble', 'mochi', 'fig'], { pond: 'Dawn', picked: st.guessed ? 'bramble' : null })
           + `<div class="behind" style="margin-top:.6rem"><b>Your notepad</b><ol><li><span class="stamp">Night 1</span>At least one of Pip, Bramble, and Fig is a Sneak.</li><li><span class="stamp">Night 2</span>At least one of Bramble, Mochi, and Clover is a Sneak.</li></ol></div>
-          <div class="behind" style="margin-top:.4rem"><b>Clover left behind:</b><ol><li><span class="stamp">Night 1</span>watched Pip's house. Bramble visited.</li></ol></div>${st.msg ? `<p class="tut-scene-text">${st.msg}</p>` : ''}`,
+          <div class="behind" style="margin-top:.4rem"><b>🚶 Your night walk</b><p class="small" style="margin:.2rem 0 0;font-weight:700">You wandered to the Bakery 🥖. You saw Bramble and someone with yellow fur. Partway through the night, someone there slipped away 👀</p></div>
+          <div class="scene-box"><b>🔍 Clues at Clover's house</b><ul><li>Large pawprints led up to the door.</li><li>Flour was tracked onto the doorstep, like someone came from the Bakery.</li></ul></div>${st.msg ? `<p class="tut-scene-text">${st.msg}</p>` : ''}`,
         ready: () => st.guessed,
       },
       { // 4
@@ -138,7 +139,8 @@
       if (s === 2 && !st.checked) { if (t === 'pip') st.checked = true; else st.msg = ''; return render(); }
       if (s === 3 && !st.guessed) {
         if (t === 'bramble') { st.guessed = true; st.msg = ''; }
-        else if (t === 'fig' || t === 'pip') st.msg = `Possible! ${byId[t].name} is in your first hint. But who shows up in BOTH hints?`;
+        else if (t === 'pip') st.msg = 'Pip was at the Bakery too (yellow fur!), but Pip is a medium-sized bunny. The pawprints were large.';
+        else if (t === 'fig') st.msg = 'Fig is in your first hint, but Fig is a tiny frog and wasn\'t at the Bakery. Who fits every clue?';
         else if (t === 'mochi') st.msg = 'Mochi is only in your second hint. Who shows up in both?';
         return render();
       }
