@@ -12,6 +12,7 @@ const FRAME_EVERY = 2;        // send a view frame every 2 ticks (10 Hz)
 const SPEED = 13;             // world units per second (the world is 100 x 100)
 const BODY = 1.3;             // critter radius for collisions
 const LIGHT = 9;              // lantern light radius
+const LIGHT_KEEN = 11;        // ...once you've finished your errands
 const DARK_SIGHT = 3.2;       // how far you can see with your lantern off
 const RECOGNIZE_LIT = 10.5;   // you can make out a lantern-lit critter a little beyond your own light
 const LAMP_LIGHT = 8;         // street lamp radius
@@ -22,6 +23,9 @@ const HOUSE_RANGE = 6;        // how close to a door you must be to use an abili
 const LAMP_RANGE = 3.4;
 const VISIT_RANGE = 7;        // the Gossip Bunny notices anyone who comes this close to the watched door
 const TRACK_EVERY = 0.55;     // seconds between footprints
+const ERRAND_RANGE = 2.8;     // stand this close to an errand spot...
+const ERRAND_TIME = 1.0;      // ...for this long to finish it
+const MOVE_SLACK = 1.4;       // how much faster than SPEED a client may report moving (network bunching)
 
 const LANDMARKS = [
   { id: 'bakery', x: 12, y: 12 }, { id: 'mill', x: 88, y: 12 },
@@ -46,7 +50,7 @@ function buildWorld(houses) {
     return { id, x: p.x, y: p.y, door: { x: p.x + Math.cos(toC) * 5.5, y: p.y + Math.sin(toC) * 5.5 }, r: 4 };
   });
   const lamps = [];
-  const LN = 6;
+  const LN = n >= 12 ? 8 : 6;
   for (let i = 0; i < LN; i++) {
     const a = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / LN;
     lamps.push({ x: 50 + 27 * Math.cos(a), y: 50 + 25 * Math.sin(a) });
@@ -93,16 +97,74 @@ function begin(room) {
   const pos = {};
   for (const h of world.homes) {
     if (!g.alive.has(h.id)) continue;
-    pos[h.id] = { x: h.door.x + (Math.random() - 0.5) * 2, y: h.door.y + (Math.random() - 0.5) * 2, dx: 0, dy: 0, lit: true, hold: null, moved: 0, lastTrack: 0, lx: h.door.x, ly: h.door.y };
+    const x = h.door.x + (Math.random() - 0.5) * 2, y = h.door.y + (Math.random() - 0.5) * 2;
+    pos[h.id] = { x, y, tx: x, ty: y, dx: 0, dy: 0, lit: true, hold: null, moved: 0, lastTrack: 0, lx: h.door.x, ly: h.door.y, budget: SPEED * 0.6, errT: 0 };
   }
   g.night = {
     t: 0, tick: 0, pos, gone: new Set(), lamps: world.lamps.map((l) => ({ ...l, lit: false })), porches: new Set(), protected: new Set(),
     tracks: [], strike: null, attempted: false, seen: {}, outs: [], visits: {}, witness: {}, zoneTime: {}, bot: {}, lampLog: [],
+    tasks: {}, tkVer: {}, tkSent: {}, ev: {}, fix: {},
   };
-  for (const id of Object.keys(pos)) { g.night.seen[id] = {}; g.night.zoneTime[id] = {}; }
+  for (const id of Object.keys(pos)) {
+    g.night.seen[id] = {}; g.night.zoneTime[id] = {}; g.night.ev[id] = [];
+    g.night.tasks[id] = makeTasks(room, id); g.night.tkVer[id] = 1;
+  }
 }
 
-const sightOf = (p) => (p.lit ? LIGHT : DARK_SIGHT);
+// ---------- tonight's errands (random per critter, so everyone has a reason to roam) ----------
+const ERRANDS = {
+  bakery: [['Grab a warm loaf at the Bakery', '🥖'], ['Return a pie tin to the Bakery', '🥧']],
+  mill: [['Fetch a sack of flour from the Mill', '🌾'], ['Check the Mill\'s creaky wheel', '⚙️']],
+  orchard: [['Pick apples in the Orchard', '🍎'], ['Look for fallen pears in the Orchard', '🍐']],
+  library: [['Return a book to the Library', '📚'], ['Borrow a storybook from the Library', '📖']],
+  pond: [['Feed the ducks at the Pond', '🦆'], ['Skip a stone across the Pond', '🪨'], ['Catch a firefly by the Pond', '✨']],
+  door: [['Leave a note at NAME\'s door', '✉️'], ['Return NAME\'s basket', '🧺'], ['Borrow sugar from NAME', '🍯']],
+};
+const pickOne = (a) => a[Math.floor(Math.random() * a.length)];
+const ROLE_TASK = {
+  check: ['Watch a critter: hold E at their door', '🦉'],
+  protect: ['Protect a critter: hold E at their door', '🦔'],
+  gossip: ['Watch a house: hold E at its door', '🐇'],
+  light: ['Hang a porch lantern: hold E at a door', '🏮'],
+};
+function makeTasks(room, id) {
+  const g = room.game, w = g.world, list = [];
+  const role = g.roles[id], sneak = isSneakTeam(role), ability = ROLES[role].night;
+  if (!sneak && ROLE_TASK[ability]) list.push({ k: 'role', text: ROLE_TASK[ability][0], e: ROLE_TASK[ability][1], done: false });
+  if (sneak && !g.settling) list.push({ k: 'strike', text: 'Spirit someone away: lantern off, get close, hold E (not in lamplight)', e: '🌑', done: false });
+  if (sneak && g.settling) list.push({ k: 'info', text: 'Settling-in night: no strikes tonight. Blend in!', e: '🌙', done: false });
+  if (role === 'trickster' && !g.settling) list.push({ k: 'meddle', text: 'Meddle with a critter: hold E at their door', e: '🎭', done: false });
+  // errands: a random mix of landmarks, the pond, a neighbour's door, and a street lamp
+  const cands = [];
+  for (const l of shuffle(w.landmarks.slice()).slice(0, 2)) {
+    const [text, e] = pickOne(ERRANDS[l.id]);
+    cands.push({ k: 'spot', text, e, x: l.x + (l.x < 50 ? 6.5 : -6.5), y: l.y + (l.y < 50 ? 6.5 : -6.5) });
+  }
+  { const a = Math.random() * Math.PI * 2, [text, e] = pickOne(ERRANDS.pond);
+    cands.push({ k: 'spot', text, e, x: POND.x + Math.cos(a) * (POND.rx + 3.6), y: POND.y + Math.sin(a) * (POND.ry + 3.6) }); }
+  const doors = w.homes.filter((h) => h.id !== id && g.alive.has(h.id));
+  if (doors.length) { const h = pickOne(doors), [text, e] = pickOne(ERRANDS.door);
+    cands.push({ k: 'spot', text: text.replace('NAME', room.name(h.id)), e, x: h.door.x, y: h.door.y }); }
+  { const i = Math.floor(Math.random() * w.lamps.length), l = w.lamps[i];
+    cands.push({ k: 'lamp', i, text: `Make sure the lamp near ${zoneOf(w, l, (x) => room.name(x)).replace(/^the /, 'the ')} is lit`, e: '💡', x: l.x, y: l.y }); }
+  for (const c of shuffle(cands).slice(0, 3)) list.push({ ...c, done: false, errand: true });
+  list.forEach((t, i) => { t.n = i; if (t.x !== undefined) { t.x = +t.x.toFixed(1); t.y = +t.y.toFixed(1); } });
+  return list;
+}
+function finishTask(room, id, t, text) {
+  const n = room.game.night; if (t.done) return;
+  t.done = true; if (text) t.text = text;
+  n.tkVer[id] = (n.tkVer[id] || 0) + 1;
+  const p = n.pos[id];
+  if (t.errand) {
+    n.ev[id].push({ e: t.e, text: `Errand done: ${t.text}` });
+    const all = n.tasks[id].filter((x) => x.errand);
+    if (p && !p.keen && all.every((x) => x.done)) { p.keen = true; n.ev[id].push({ e: '✨', text: 'All errands done! Your lantern burns brighter for the rest of the night.', big: true }); }
+  }
+}
+function taskOf(n, id, k) { return (n.tasks[id] || []).find((t) => t.k === k); }
+
+const sightOf = (p) => (p.lit ? (p.keen ? LIGHT_KEEN : LIGHT) : DARK_SIGHT);
 function lightSources(n) {
   const out = [];
   for (const l of n.lamps) if (l.lit) out.push({ x: l.x, y: l.y, r: LAMP_LIGHT });
@@ -164,6 +226,23 @@ function input(room, id, m) {
   const g = room.game, n = g && g.night;
   if (!n || g.phase !== 'night' || !n.pos[id] || n.gone.has(id)) return;
   const p = n.pos[id];
+  if (m.t === 'pos') {
+    // The browser moves your critter itself (no waiting on the network). The server checks it:
+    // no faster than SPEED (with a little slack for bunched-up messages), and no walking through walls.
+    const x = Number(m.x), y = Number(m.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const now = Date.now(), el = Math.min(0.6, (now - (p.posAt || now)) / 1000);
+    p.posAt = now; p.dx = 0; p.dy = 0;
+    p.budget = Math.min(SPEED * 0.6, (p.budget || 0) + SPEED * MOVE_SLACK * el);
+    const d = Math.hypot(x - p.x, y - p.y);
+    let nx = x, ny = y;
+    if (d > p.budget) { const k = p.budget / d; nx = p.x + (x - p.x) * k; ny = p.y + (y - p.y) * k; }
+    p.budget = Math.max(0, p.budget - Math.min(d, p.budget));
+    const q = { x: nx, y: ny }; collide(g.world, q);
+    p.x = q.x; p.y = q.y;
+    if (Math.hypot(q.x - x, q.y - y) > 1.5) n.fix[id] = true; // tell that browser where it really is
+    return;
+  }
   if (m.t === 'move') {
     let dx = Number(m.dx) || 0, dy = Number(m.dy) || 0;
     const len = Math.hypot(dx, dy);
@@ -177,26 +256,41 @@ function input(room, id, m) {
   } else if (m.t === 'hold') {
     if (!m.on) { p.hold = null; return; }
     const tgt = holdTarget(room, id);
+    if (p.hold && tgt && p.hold.kind === tgt.kind && p.hold.target === tgt.target) return; // already doing it: keep the progress
     p.hold = tgt ? { ...tgt, t: 0 } : null;
   }
 }
 
 function completeHold(room, id, h) {
   const g = room.game, n = g.night, p = n.pos[id], role = g.roles[id];
-  if (h.kind === 'lamp') { n.lamps[h.target].lit = true; n.lampLog.push({ id, lamp: h.target, t: n.t, on: true }); return; }
-  if (h.kind === 'blow') { n.lamps[h.target].lit = false; n.lampLog.push({ id, lamp: h.target, t: n.t, on: false }); n.outs.push({ x: n.lamps[h.target].x, y: n.lamps[h.target].y, t: n.t, lamp: true }); return; }
+  const ev = n.ev[id] || (n.ev[id] = []), who = (x) => room.name(x);
+  if (h.kind === 'lamp') { n.lamps[h.target].lit = true; n.lampLog.push({ id, lamp: h.target, t: n.t, on: true }); ev.push({ e: '💡', text: 'You lit the lamp!' }); return; }
+  if (h.kind === 'blow') { n.lamps[h.target].lit = false; n.lampLog.push({ id, lamp: h.target, t: n.t, on: false }); n.outs.push({ x: n.lamps[h.target].x, y: n.lamps[h.target].y, t: n.t, lamp: true }); ev.push({ e: '🌑', text: 'You blew out the lamp.' }); return; }
   if (h.kind === 'house') {
-    if (role === 'trickster') { g.meddles[id] = h.target; return; }
+    if (role === 'trickster') {
+      g.meddles[id] = h.target;
+      const t = taskOf(n, id, 'meddle'); if (t) finishTask(room, id, t, `Meddled with ${who(h.target)}`);
+      ev.push({ e: '🎭', text: `You meddled with ${who(h.target)}'s night.`, big: true, target: h.target });
+      return;
+    }
     const kind = ROLES[role].night;
     g.actions[id] = { kind, target: h.target };
     if (kind === 'protect') n.protected.add(h.target);
     if (kind === 'light') n.porches.add(h.target);
     if (kind === 'gossip') n.visits[h.target] = n.visits[h.target] || new Set();
+    const msg = { check: [`Watching ${who(h.target)} tonight`, `🦉 You're watching ${who(h.target)}. Your hint arrives in the morning.`],
+      protect: [`Protecting ${who(h.target)} tonight`, `🦔 ${who(h.target)} is protected tonight!`],
+      gossip: [`Watching ${who(h.target)}'s house`, `🐇 You're watching ${who(h.target)}'s house. You'll learn who came by.`],
+      light: [`Porch lantern on ${who(h.target)}'s house`, `🏮 ${who(h.target)}'s porch is glowing. No one can be taken in its light.`] }[kind];
+    const t = taskOf(n, id, 'role'); if (t) finishTask(room, id, t, msg[0]);
+    ev.push({ e: '✅', text: msg[1], big: true, target: h.target });
     return;
   }
   if (h.kind === 'strike') {
     const v = h.target, vp = n.pos[v];
     n.attempted = true;
+    for (const s of Object.keys(n.pos)) if (isSneakTeam(g.roles[s])) { const t = taskOf(n, s, 'strike'); if (t) finishTask(room, s, t, s === id ? `You went after ${room.name(h.target)}. Now get away and relight!` : `${room.name(id)} went after ${room.name(h.target)}`); }
+    if (n.ev[h.target]) n.ev[h.target].push({ e: '😱', text: 'Something lunged at you in the dark!', big: true });
     const zone = zoneOf(g.world, vp, (x) => room.name(x));
     const team = Object.keys(n.pos).filter((x) => isSneakTeam(g.roles[x]));
     if (n.protected.has(v)) {
@@ -225,12 +319,24 @@ function tick(room, dt) {
   require('./bots').tick(room, dt);
   for (const id of ids) {
     const p = n.pos[id];
-    const ox = p.x, oy = p.y;
+    const ox = p.tx === undefined ? p.x : p.tx, oy = p.ty === undefined ? p.y : p.ty;
     if (p.dx || p.dy) {
       p.x += p.dx * SPEED * dt; p.y += p.dy * SPEED * dt;
       collide(g.world, p);
     }
     const moved = Math.hypot(p.x - ox, p.y - oy);
+    p.tx = p.x; p.ty = p.y;
+    // errands
+    const tasks = n.tasks[id];
+    if (tasks) {
+      let near = false;
+      for (const t of tasks) {
+        if (t.done || !t.errand) continue;
+        if (t.k === 'lamp') { if (n.lamps[t.i].lit && dist(p, t) <= LAMP_RANGE + 1) finishTask(room, id, t); continue; }
+        if (dist(p, t) <= ERRAND_RANGE) { near = true; p.errT += dt; if (p.errT >= ERRAND_TIME) { finishTask(room, id, t); p.errT = 0; } break; }
+      }
+      if (!near) p.errT = 0;
+    }
     if (p.hold && moved > 0.05) p.hold = null; // moving cancels a hold
     if (p.hold) {
       // re-validate the target every tick
@@ -280,15 +386,19 @@ function frameFor(room, viewerId) {
     else if (q.lit) glows.push([+q.x.toFixed(1), +q.y.toFixed(1)]);
   }
   const team = isSneakTeam(g.roles[viewerId]);
-  return {
+  const out = {
     t: 'nf', nt: +n.t.toFixed(2),
-    me: me && !wisp ? [+me.x.toFixed(2), +me.y.toFixed(2), me.lit ? 1 : 0, me.hold ? me.hold.kind : 0, me.hold ? +(me.hold.t / HOLD_TIME[me.hold.kind]).toFixed(2) : 0] : null,
+    me: me && !wisp ? [+me.x.toFixed(2), +me.y.toFixed(2), me.lit ? 1 : 0, me.hold ? me.hold.kind : 0, me.hold ? +(me.hold.t / HOLD_TIME[me.hold.kind]).toFixed(2) : 0, me.keen ? 1 : 0, +(me.errT / ERRAND_TIME).toFixed(2)] : null,
     see, glows,
     lamps: n.lamps.map((l) => (l.lit ? 1 : 0)).join(''),
     porches: [...n.porches],
     struck: team ? !!n.strike : undefined,
     wisp,
   };
+  if (n.tasks[viewerId] && n.tkSent[viewerId] !== n.tkVer[viewerId]) { out.tasks = n.tasks[viewerId]; n.tkSent[viewerId] = n.tkVer[viewerId]; }
+  if (n.ev[viewerId] && n.ev[viewerId].length) { out.ev = n.ev[viewerId]; n.ev[viewerId] = []; }
+  if (n.fix[viewerId] && me) { out.fix = 1; n.fix[viewerId] = false; }
+  return out;
 }
 
 // ---------- the morning: turn the night into private memories + public tracks ----------
@@ -324,6 +434,6 @@ function summarize(room, meddled = new Set()) {
 }
 
 module.exports = {
-  TICK, FRAME_EVERY, LIGHT, DARK_SIGHT, LAMP_LIGHT, PORCH_LIGHT, STRIKE_RANGE, HOLD_TIME, HOUSE_RANGE, LAMP_RANGE, SPEED,
+  TICK, FRAME_EVERY, LIGHT, LIGHT_KEEN, ERRAND_RANGE, ERRAND_TIME, DARK_SIGHT, LAMP_LIGHT, PORCH_LIGHT, STRIKE_RANGE, HOLD_TIME, HOUSE_RANGE, LAMP_RANGE, SPEED,
   begin, tick, input, frameFor, summarize, holdTarget, recognizes, inStaticLight, zoneOf, blocked, dist, buildWorld, LANDMARKS,
 };

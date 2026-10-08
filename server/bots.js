@@ -21,7 +21,7 @@ function initBot(room, p) {
     plan, striker, goal: null, wait: Math.random() * 1.5, stuck: 0, attempts: 0, fleeUntil: 0,
     stalkAt: dur * (humanSneak ? 0.6 : 0.2 + Math.random() * 0.25),
     // some villagers go dark for a while too (to spy, hide, or just be weird), so "lantern off" is a hint, not proof
-    spyAt: !sneak && Math.random() < ({ 4: 0.15, 5: 0.45, 6: 0.55, 7: 0.7 }[g.n] ?? (g.n <= 10 ? 0.2 : 0)) ? dur * (0.15 + Math.random() * 0.6) : Infinity, spyFor: 6 + Math.random() * 10,
+    spyAt: !sneak && Math.random() < ({ 4: 0.15, 5: 0.4, 6: 0.4, 7: 0.5 }[g.n] ?? (g.n <= 10 ? 0.08 : 0)) ? dur * (0.15 + Math.random() * 0.6) : Infinity, spyFor: 6 + Math.random() * 10,
   };
 }
 
@@ -40,6 +40,13 @@ function steer(room, id, b) {
 
 function errand(room, p, b) {
   const g = room.game, n = g.night, me = n.pos[p.id], sneak = isSneakTeam(g.roles[p.id]);
+  // tonight's own errand list first (most of the time), so bots roam like real players
+  const todo = (n.tasks[p.id] || []).filter((t) => t.errand && !t.done);
+  if (todo.length && Math.random() < 0.75) {
+    const t = todo.sort((a, c) => dist(me, a) - dist(me, c))[0];
+    if (t.k === 'lamp' && !n.lamps[t.i].lit) { b.goal = { x: t.x, y: t.y }; b.task = { kind: 'lamp', i: t.i }; return; }
+    if (t.k === 'spot') { b.goal = { x: t.x, y: t.y }; b.task = { kind: 'spot' }; return; }
+  }
   const dark = n.lamps.map((l, i) => ({ ...l, i })).filter((l) => !l.lit);
   const r = Math.random();
   if (dark.length && r < (sneak ? 0.3 : 0.55)) {
@@ -126,7 +133,8 @@ function think(room, p, b, dt) {
     else if (dist(me, l) <= Night.LAMP_RANGE - 0.8) { me.dx = 0; me.dy = 0; Night.input(room, id, { t: 'hold', on: true }); b.task = null; b.goal = null; return; }
   }
   if (!b.goal || dist(me, b.goal) < 1.6) {
-    if (b.goal) b.wait = 0.4 + Math.random() * (careless ? 3 : 1.6);
+    if (b.goal) b.wait = (b.task && b.task.kind === 'spot' ? Night.ERRAND_TIME + 0.2 : 0) + 0.4 + Math.random() * (careless ? 3 : 1.6);
+    if (b.task && b.task.kind === 'spot') b.task = null;
     errand(room, p, b);
   }
   // stuck? pick somewhere else

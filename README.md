@@ -6,6 +6,8 @@ A free, cozy social deduction game you play in the browser. A few critters in th
 - Quick Play with strangers (by language), or private burrows with a 4-letter code and share link
 - Add AI critters (Sleepy, Clever, Cunning) to fill any lobby
 - **Lantern Night**: every night is real-time. Walk the dark village with your lantern (WASD / arrows, or drag on a phone), light street lamps, and use abilities by holding E at someone's door. Sneaks must snuff their lantern and creep up on someone outside the lamplight to strike, and anyone nearby might see them
+- A random task list every night: your role's job plus 3 errands around the village (feed the ducks, return a book…). Finish them all for a brighter lantern. Sneaks get fake errands as cover
+- Smooth on slow connections: your own critter moves instantly in your browser (the server double-checks every step), other critters glide between updates, and abilities show a big confirmation the moment they work
 - Fog of war done on the server: you only receive critters your light (or theirs) reveals
 - Morning clues you can actually check: who *you* saw and where (and whether their lantern was out), where lanterns went dark, which lamps were blown out, and a replayable footprint map (paw size, no names)
 - Hints, not answers: every info role gets fuzzy information you have to reason about
@@ -98,7 +100,7 @@ Setups per player count live in `server/roles.js` (`sneakCount`, `owlCount`, and
 
 To shorten nights for testing: `NIGHT_MULT=0.4 npm start`. (`SPEED_MULT` below 1 runs nights as an instant simulation, for balance scripts only.)
 
-Controls at night: **WASD / arrows** to walk, **hold E or Space** to act (light a lamp, use your ability at a door, or strike), **Q** to snuff or relight your lantern. On a phone, press and drag on the map to walk and use the on-screen buttons.
+Controls at night: **WASD / arrows** to walk, **hold E or Space** to act (light a lamp, use your ability at a door, or strike), **Q** to snuff or relight your lantern, **T** to open or close tonight's task list. On a phone, press and drag on the map to walk and use the on-screen buttons.
 
 ## License
 

@@ -160,7 +160,7 @@ class Room {
     }
     if (!g || g.phase === 'over') return;
     switch (m.t) {
-      case 'move': case 'lantern': case 'hold': return Night.input(this, p.id, m);
+      case 'move': case 'pos': case 'lantern': case 'hold': return Night.input(this, p.id, m);
       case 'post': return this.post(p, m);
       case 'react': return this.react(p, m);
       case 'yarn': return this.setYarn(p, m);
@@ -598,7 +598,8 @@ class Room {
       myRole: role, myLog: g.priv[pid] || [], myNotes: g.notes[pid] || [],
       myAction: g.actions[pid] || null,
       world: g.world, nightDur: g.nightDur, scenes: g.scenes, tracks: g.phase === 'night' ? [] : g.tracks, outs: g.outs,
-      nightConst: { light: Night.LIGHT, dark: Night.DARK_SIGHT, lamp: Night.LAMP_LIGHT, porch: Night.PORCH_LIGHT, strike: Night.STRIKE_RANGE, house: Night.HOUSE_RANGE, lampR: Night.LAMP_RANGE, speed: Night.SPEED },
+      nightConst: { light: Night.LIGHT, keen: Night.LIGHT_KEEN, dark: Night.DARK_SIGHT, lamp: Night.LAMP_LIGHT, porch: Night.PORCH_LIGHT, strike: Night.STRIKE_RANGE, house: Night.HOUSE_RANGE, lampR: Night.LAMP_RANGE, speed: Night.SPEED, hold: Night.HOLD_TIME, errand: Night.ERRAND_RANGE },
+      nightTasks: g.phase === 'night' && g.night && g.night.tasks ? g.night.tasks[pid] || null : null,
       attempted: isSneakTeam(role) && g.night ? !!g.night.attempted : undefined,
       iReady: g.ready.has(pid), lastProtect: g.lastProtect[pid] || null, lastLight: g.lastLight[pid] || null,
       myMeddle: role === 'trickster' ? g.meddles[pid] || null : null, lastMeddle: role === 'trickster' ? g.lastMeddle[pid] || null : null,

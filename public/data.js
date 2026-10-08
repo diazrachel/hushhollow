@@ -53,6 +53,7 @@ window.HH = {
   HANDBOOK: {
     rules: [
       ['🏮', 'Lantern Night', 'At night everyone walks the village for real (WASD/arrows, or drag on a phone). Your lantern lights a circle around you; outside it is dark. Street lamps and lit porches glow for everyone. Hold E (or the action button) at a door, lamp, or critter to act.'],
+      ['📝', 'Tonight\'s tasks', 'Every night you get a task list (top-left of the map, and in your role card). Your role\'s job comes first, then 3 random errands: stand on the glowing spot to finish one. Finish every errand and your lantern burns brighter. Everyone gets different errands, so seeing someone at the Mill isn\'t suspicious by itself… Sneaks get fake errands too!'],
       ['🌑', 'Going dark', 'Press Q to snuff or relight your lantern. In the dark you can only see critters right next to you, and others can barely see you. Sneaks MUST go dark to strike, but villagers can go dark too, to spy or hide. Dark is a hint, not proof.'],
       ['🌙', 'Strikes', 'Once per night the Sneaks can spirit away one critter who is outside lamplight and porch light. The first night (and an extra night in some village sizes) is a settling-in night: nobody vanishes.'],
       ['👣', 'Footprints', 'Everyone leaves footprints (small, medium, or large paws) but no names. In the morning, open Footprints and drag the slider to replay the night. Look at where the tracks went around the time of the strike.'],

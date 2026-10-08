@@ -481,7 +481,8 @@
       const r = $('#night-wrap').getBoundingClientRect();
       if (r.top < 0 || r.bottom > innerHeight) $('#night-wrap').scrollIntoView({ block: 'center', behavior: 'smooth' });
     }, 60);
-    if (isNight && window.HHNight) window.HHNight.start({ send, game: () => S && S.game, P, me: () => S.me, role: (r) => ROLES[r] });
+    if (isNight && window.HHNight) window.HHNight.start({ send, game: () => S && S.game, P, me: () => S.me, role: (r) => ROLES[r], sound, onTasks: () => renderAction() });
+    if (isNight && window.HHNight && g.nightTasks) window.HHNight.setTasks(g.nightTasks);
     else if (window.HHNight) window.HHNight.stop();
     renderMap(); renderAction(); renderSecrets(); renderTabs(); renderTracks();
   }
@@ -617,6 +618,15 @@
         if (!onTeam || g.settling) steps.push('Light street lamps (<b>hold E</b> by a lamp). Sneaks can\'t strike in lamplight.', 'Notice who you meet, and where. Lanterns going dark are suspicious 👀');
         if (g.myRole === 'trickster' && !g.settling) steps.push(g.myMeddle ? `✓ Meddled with ${nm(g.myMeddle)}` : '🎭 Hold E at a door to meddle with that critter\'s night.');
         text = `<ol>${steps.map((x) => `<li>${x}</li>`).join('')}</ol>`;
+        const tl = window.HHNight && window.HHNight.tasks ? window.HHNight.tasks() : [];
+        if (tl.length) {
+          const esc2 = (t) => String(t).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+          const main = tl.find((t) => !t.errand && t.k !== 'info');
+          if (main) { done = main.done; who = null; }
+          text = `<ul class="task-list">${tl.map((t) => t.k === 'info' ? `<li class="info"><span class="tk-e">${t.e}</span><span>${esc2(t.text)}</span></li>`
+            : `<li class="${t.done ? 'done' : ''} ${t.errand ? '' : 'main'}"><span class="tk-box">${t.done ? '✓' : ''}</span><span class="tk-e">${t.e}</span><span>${esc2(t.text)}</span></li>`).join('')}</ul>
+            <p class="small muted" style="margin:.5rem 0 0;font-weight:700">Errands: stand on the glowing spot (✨ on your map). Finish all of them and your lantern burns brighter. Light dark street lamps with <b>E</b>: Sneaks can't strike in lamplight. Watch who goes dark 👀</p>`;
+        }
       }
     } else if (g.phase === 'dawn') { label = 'Morning'; text = 'Check the morning report and what you learned last night.'; }
     else if (g.phase === 'day') {
@@ -946,7 +956,7 @@
     wrap.classList.toggle('low', s <= 10);
     ring.style.strokeDashoffset = 113.1 * (1 - Math.min(1, ms / (ui.phaseTotal || 1)));
     const meAlive = g.alive.includes(S.me);
-    if (g.phase === 'night' && meAlive && hasNight(g) && Date.now() - ui.phaseStart > 9000 && !g.mySneakVote && !g.myAction) hint(`night${g.day}`, 'walk to a critter\'s door and hold E to use your ability!');
+    if (g.phase === 'night' && meAlive && hasNight(g) && Date.now() - ui.phaseStart > 9000 && !g.mySneakVote && !g.myAction && !(window.HHNight && window.HHNight.tasks().some((t) => t.k === 'role' && t.done))) hint(`night${g.day}`, 'walk to a critter\'s door and hold E to use your ability!');
   }, 250);
 
   buildHome();

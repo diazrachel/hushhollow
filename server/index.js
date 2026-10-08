@@ -66,10 +66,10 @@ wss.on('connection', (ws) => {
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (raw) => {
-    // basic rate limit: 25 messages per second
+    // basic rate limit: 60 messages per second (night movement sends ~15 a second)
     const now = Date.now();
     if (now - ws.bucket.at > 1000) ws.bucket = { n: 0, at: now };
-    if (++ws.bucket.n > 25) return;
+    if (++ws.bucket.n > 60) return;
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
 
