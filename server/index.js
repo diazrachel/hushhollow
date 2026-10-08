@@ -77,19 +77,24 @@ wss.on('connection', (ws) => {
       if (!TOKEN_RE.test(m.token || '')) return send(ws, { t: 'error', text: 'Your browser sent an invalid session. Refresh the page.' });
       ws.token = m.token; ws.profile = m.profile || {};
       const found = hub.lookup(ws.token);
-      if (found) {
-        const { room, p } = found;
-        if (p.ws && p.ws !== ws) try { p.ws.close(); } catch {}
-        p.ws = ws; p.connected = true; p.lastSeen = Date.now();
-        if (p.isAI && p.dropped) { p.isAI = false; p.dropped = false; delete p.aiLevel; room.log(`${p.name} is back.`); }
-        ws.session = { code: room.code, pid: p.id };
-        room.changed();
-      } else send(ws, { t: 'home' });
+      if (found && found.p.leftAt) send(ws, { t: 'home', rejoin: rejoinInfo(found) }); // they chose to leave: offer, don't force
+      else if (found) reclaim(ws, found);
+      else send(ws, { t: 'home' });
       return;
     }
     if (!ws.token) return;
     if (m.t === 'profile') { ws.profile = m.profile || {}; return; }
 
+    if (m.t === 'rejoin') {
+      const found = hub.lookup(ws.token);
+      if (found && found.room.game) return reclaim(ws, found);
+      return send(ws, { t: 'error', text: 'That game has ended, so there is no seat to go back to.' });
+    }
+    if (m.t === 'join' && !ws.session) {
+      // typing the code of the game you left puts you back in your seat
+      const found = hub.lookup(ws.token);
+      if (found && found.room.code === String(m.code || '').toUpperCase().trim() && found.room.game) return reclaim(ws, found);
+    }
     if (m.t === 'quick' || m.t === 'create' || m.t === 'join') {
       if (ws.session) leave(ws);
       let room;
@@ -114,7 +119,11 @@ wss.on('connection', (ws) => {
       }
       return;
     }
-    if (m.t === 'leave') { leave(ws); return send(ws, { t: 'home' }); }
+    if (m.t === 'leave') {
+      leave(ws);
+      const found = hub.lookup(ws.token);
+      return send(ws, found && found.p.leftAt ? { t: 'home', rejoin: rejoinInfo(found) } : { t: 'home' });
+    }
 
     const s = ws.session; if (!s) return;
     const room = hub.rooms.get(s.code);
@@ -133,8 +142,17 @@ function leave(ws) {
   const s = ws.session; ws.session = null;
   if (!s) return;
   const room = hub.rooms.get(s.code);
-  hub.forget(ws.token);
+  const midGame = room && room.game && room.game.phase !== 'over';
+  if (!midGame) hub.forget(ws.token); // mid-game we remember the seat so they can rejoin
   if (room) room.remove(s.pid, 'left');
+}
+function rejoinInfo({ room, p }) { return { code: room.code, name: p.name }; }
+function reclaim(ws, { room, p }) {
+  if (p.ws && p.ws !== ws) try { p.ws.close(); } catch {}
+  p.ws = ws; p.connected = true; p.lastSeen = Date.now();
+  if (p.isAI && p.dropped) { p.isAI = false; p.dropped = false; delete p.aiLevel; delete p.leftAt; room.log(`${p.name} is back.`); room.fixHost(); }
+  ws.session = { code: room.code, pid: p.id };
+  room.changed();
 }
 
 // ---------- housekeeping (every second) ----------

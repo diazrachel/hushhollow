@@ -103,6 +103,8 @@ function suspicion(room, p) {
   const myPriv = g.priv[me] || [];
   const sights = myPriv.filter((e) => e.sight).map((e) => e.sight);
   for (const e of myPriv) if (e.witness && e.witness.by in s) add(e.witness.by, 100);
+  // the bell: whoever was hanging around the tombstone when it rang looks shady
+  for (const h of g.history || []) if (h.bell) h.bell.near.forEach((x) => { if (x.id !== me && x.id in s) add(x.id, x.how === 'right next to it' ? 3 : x.how === 'close by' ? 2 : 1); });
   const claimedAt = (id, night) => { const c = [...g.claims].reverse().find((x) => x.kind === 'at' && x.by === id && x.night === night); return c ? c.place : null; };
   for (const sc of g.scenes || []) {
     const mine = sights.find((x) => x.night === sc.night);

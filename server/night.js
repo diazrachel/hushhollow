@@ -18,7 +18,9 @@ const RECOGNIZE_LIT = 10.5;   // you can make out a lantern-lit critter a little
 const LAMP_LIGHT = 8;         // street lamp radius
 const PORCH_LIGHT = 11;       // Lantern Keeper's porch light radius
 const STRIKE_RANGE = 3.4;
-const HOLD_TIME = { strike: 1.4, house: 1.5, lamp: 1.4, blow: 0.8 };
+const HOLD_TIME = { strike: 1.4, house: 1.5, lamp: 1.4, blow: 0.8, bell: 1.0 };
+const BELL_RANGE = 3.6;
+const BELL_NEAR = 25;          // the morning report names who was this close to the tombstone when the bell rang
 const HOUSE_RANGE = 6;        // how close to a door you must be to use an ability there
 const LAMP_RANGE = 3.4;
 const VISIT_RANGE = 7;        // the Gossip Bunny notices anyone who comes this close to the watched door
@@ -55,7 +57,8 @@ function buildWorld(houses) {
     const a = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / LN;
     lamps.push({ x: 50 + 27 * Math.cos(a), y: 50 + 25 * Math.sin(a) });
   }
-  return { size: 100, homes, lamps, landmarks: LANDMARKS, pond: POND };
+  // the village bell stands on the north shore of the pond
+  return { size: 100, homes, lamps, landmarks: LANDMARKS, pond: POND, bell: { x: 50, y: POND.y - POND.ry - 4.2 } };
 }
 
 // Name a spot so players (and the morning report) can talk about it
@@ -104,7 +107,10 @@ function begin(room) {
     t: 0, tick: 0, pos, gone: new Set(), lamps: world.lamps.map((l) => ({ ...l, lit: false })), porches: new Set(), protected: new Set(),
     tracks: [], strike: null, attempted: false, seen: {}, outs: [], visits: {}, witness: {}, zoneTime: {}, bot: {}, lampLog: [],
     tasks: {}, tkVer: {}, tkSent: {}, ev: {}, fix: {},
+    tomb: null, found: new Set(), foundAt: {}, bell: null, endNow: false,
   };
+  if (g.bellsLeft === undefined) g.bellsLeft = g.n >= 8 ? 3 : 2;
+  if (!g.world.bell) g.world.bell = { x: 50, y: POND.y - POND.ry - 4.2 };
   for (const id of Object.keys(pos)) {
     g.night.seen[id] = {}; g.night.zoneTime[id] = {}; g.night.ev[id] = [];
     g.night.tasks[id] = makeTasks(room, id); g.night.tkVer[id] = 1;
@@ -213,6 +219,7 @@ function holdTarget(room, id) {
     }
     if (best) return { kind: 'house', target: best };
   }
+  if (n.tomb && n.found.has(id) && !n.bell && g.bellsLeft > 0 && dist(p, g.world.bell) <= BELL_RANGE) return { kind: 'bell', target: 0 };
   for (let i = 0; i < n.lamps.length; i++) {
     const l = n.lamps[i];
     if (dist(p, l) > LAMP_RANGE) continue;
@@ -264,6 +271,7 @@ function input(room, id, m) {
 function completeHold(room, id, h) {
   const g = room.game, n = g.night, p = n.pos[id], role = g.roles[id];
   const ev = n.ev[id] || (n.ev[id] = []), who = (x) => room.name(x);
+  if (h.kind === 'bell') { ringBell(room, id); return; }
   if (h.kind === 'lamp') { n.lamps[h.target].lit = true; n.lampLog.push({ id, lamp: h.target, t: n.t, on: true }); ev.push({ e: '💡', text: 'You lit the lamp!' }); return; }
   if (h.kind === 'blow') { n.lamps[h.target].lit = false; n.lampLog.push({ id, lamp: h.target, t: n.t, on: false }); n.outs.push({ x: n.lamps[h.target].x, y: n.lamps[h.target].y, t: n.t, lamp: true }); ev.push({ e: '🌑', text: 'You blew out the lamp.' }); return; }
   if (h.kind === 'house') {
@@ -301,6 +309,8 @@ function completeHold(room, id, h) {
     }
     n.strike = { by: id, victim: v, x: vp.x, y: vp.y, t: n.t, zone, saved: false };
     n.gone.add(v); vp.hold = null; vp.dx = 0; vp.dy = 0;
+    n.tomb = { x: +vp.x.toFixed(1), y: +vp.y.toFixed(1), victim: v, t: n.t };
+    n.found.add(id); n.foundAt[id] = n.t; // the culprit knows exactly where it is
     if (vp.lit) n.outs.push({ x: vp.x, y: vp.y, t: n.t, id: v });
     vp.lit = false;
     for (const s of team) room.priv(s, `Night ${g.day}: ${room.name(id)} spirited away ${room.name(v)} near ${zone}.`);
@@ -361,6 +371,22 @@ function tick(room, dt) {
     const h = g.world.homes.find((x) => x.id === a.target), set = n.visits[a.target] || (n.visits[a.target] = new Set());
     for (const id of ids) if (id !== watcher && id !== a.target && g.roles[id] !== 'mole' && dist(n.pos[id], h.door) <= VISIT_RANGE) set.add(id);
   }
+  // stumbling on the tombstone
+  if (n.tomb && n.tick % 2 === 0) {
+    for (const id of ids) {
+      if (n.found.has(id)) continue;
+      const p = n.pos[id], d = dist(p, n.tomb);
+      if (d <= sightOf(p) + 0.5 || (inStaticLight(g, n.tomb) && d <= 13)) {
+        n.found.add(id); n.foundAt[id] = n.t;
+        const left = g.bellsLeft, vname = room.name(n.tomb.victim);
+        n.ev[id].push({ e: '🪦', big: true, text: left > 0 && !n.bell ? `You found ${vname}'s tombstone! Ring the bell by the Pond to call everyone (${left} ring${left === 1 ? '' : 's'} left this game).` : `You found ${vname}'s tombstone! Remember who was around…` });
+        if (left > 0 && !n.bell) {
+          n.tasks[id].unshift({ k: 'bell', n: 99, text: `Ring the bell by the Pond (${left} ring${left === 1 ? '' : 's'} left this game)`, e: '🔔', x: g.world.bell.x, y: g.world.bell.y, done: false });
+          n.tkVer[id]++;
+        }
+      }
+    }
+  }
   // sightings (5 times a second)
   if (n.tick % 4 === 0) {
     for (const o of ids) for (const q of ids) {
@@ -372,6 +398,21 @@ function tick(room, dt) {
       if (!lp || n.t - lp[0] >= 1 || lp[3] !== qlit) rec.pts.push([+n.t.toFixed(1), +n.pos[q].x.toFixed(1), +n.pos[q].y.toFixed(1), qlit]);
     }
   }
+}
+
+function ringBell(room, id) {
+  const g = room.game, n = g.night;
+  if (n.bell || g.bellsLeft <= 0) return;
+  g.bellsLeft--;
+  const near = Object.keys(n.pos).filter((q) => q !== n.tomb.victim && !n.gone.has(q) && g.alive.has(q))
+    .map((q) => ({ id: q, d: +dist(n.pos[q], n.tomb).toFixed(1) })).filter((x) => x.d <= BELL_NEAR).sort((a, b) => a.d - b.d).slice(0, 3);
+  n.bell = { by: id, t: n.t, near, victim: n.tomb.victim };
+  for (const q of Object.keys(n.ev)) {
+    n.ev[q].push({ e: '🔔', big: true, text: q === id ? 'You rang the bell! Everyone, to the Pond…' : `${room.name(id)} rang the bell! Everyone, to the Pond…` });
+    const t = taskOf(n, q, 'bell'); if (t) finishTask(room, q, t, q === id ? 'You rang the bell' : `${room.name(id)} rang the bell`);
+  }
+  n.endNow = true;
+  if (room.bellRung) room.bellRung();
 }
 
 // What one player gets to see this frame (fog of war is enforced HERE, not in the browser)
@@ -395,6 +436,8 @@ function frameFor(room, viewerId) {
     struck: team ? !!n.strike : undefined,
     wisp,
   };
+  if (n.tomb && (wisp || n.found.has(viewerId))) out.tomb = [n.tomb.x, n.tomb.y, n.tomb.victim];
+  out.bells = g.bellsLeft; if (n.bell) out.rung = 1;
   if (n.tasks[viewerId] && n.tkSent[viewerId] !== n.tkVer[viewerId]) { out.tasks = n.tasks[viewerId]; n.tkSent[viewerId] = n.tkVer[viewerId]; }
   if (n.ev[viewerId] && n.ev[viewerId].length) { out.ev = n.ev[viewerId]; n.ev[viewerId] = []; }
   if (n.fix[viewerId] && me) { out.fix = 1; n.fix[viewerId] = false; }
@@ -424,6 +467,7 @@ function summarize(room, meddled = new Set()) {
     if (!seen.length) text = `Night ${night}: you spent the night around ${zones.slice(0, 2).join(' and ') || 'home'} and didn't run into anyone.`;
     else text = `Night ${night}: you were around ${zones.slice(0, 2).join(' and ')}. You saw ${seen.map((s) => `${name(s.id)} (${spot(s)}${s.dark ? ', lantern OFF 🌑' : ''})`).join(', ')}.`;
     room.priv(o, text, { sight: { night, zones, seen } });
+    if (n.tomb && n.found.has(o) && o !== (n.strike && n.strike.by)) room.priv(o, `Night ${night}: 🪦 you found ${name(n.tomb.victim)}'s tombstone near ${zoneOf(g.world, n.tomb, name)} (${when(n.foundAt[o])}).`, { found: { night, at: n.foundAt[o] } });
     const w = n.witness[o];
     if (w) room.priv(o, `Night ${night}: 😱 you SAW ${name(w.by)} spirit away ${name(w.victim)} near ${w.zone}!`, { witness: { night, by: w.by, victim: w.victim } });
   }
@@ -435,5 +479,6 @@ function summarize(room, meddled = new Set()) {
 
 module.exports = {
   TICK, FRAME_EVERY, LIGHT, LIGHT_KEEN, ERRAND_RANGE, ERRAND_TIME, DARK_SIGHT, LAMP_LIGHT, PORCH_LIGHT, STRIKE_RANGE, HOLD_TIME, HOUSE_RANGE, LAMP_RANGE, SPEED,
+  BELL_RANGE, BELL_NEAR, ringBell,
   begin, tick, input, frameFor, summarize, holdTarget, recognizes, inStaticLight, zoneOf, blocked, dist, buildWorld, LANDMARKS,
 };

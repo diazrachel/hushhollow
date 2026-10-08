@@ -22,7 +22,7 @@
   let lastSent = { x: -1, y: -1 }, lastSendAt = 0;
   const keys = new Set();
   let touchDir = null, holding = false, localHold = null, lastHoldSend = 0;
-  let tasks = [], tasksOpen = null, mark = null;
+  let tasks = [], tasksOpen = null, mark = null, lastBells;
   let worldCv = null, worldKey = '', miniKey = '', miniStatic = null;
 
   // ---------- helpers ----------
@@ -145,6 +145,7 @@
       if (f.me[3]) localHold && (localHold.seen = true);
       else if (localHold && (localHold.seen || performance.now() - localHold.start > 1200)) localHold = null;
     } else me = null;
+    if (f.bells !== lastBells) { lastBells = f.bells; if (!f.tasks) renderTasks(); }
     if (f.tasks) { tasks = f.tasks; renderTasks(); api.onTasks && api.onTasks(tasks); }
     if (f.ev) for (const e of f.ev) {
       showBanner(e);
@@ -250,6 +251,16 @@
       if (img.complete) c.drawImage(img, x - 4.8 * s, y - 4.6 * s, 9.6 * s, 8.4 * s);
       label(c, `${p.name || '?'}`, x, y + 5.2 * s, s, '#2B2233', g.alive.includes(h.id) ? '#FFF8EC' : '#C9C2D6');
     }
+    // the village bell
+    if (W.bell) {
+      const [bx, by] = sc(W.bell.x, W.bell.y);
+      c.fillStyle = '#8A5A3C'; c.strokeStyle = '#2B2233'; c.lineWidth = 0.35 * s;
+      c.fillRect(bx - 2.2 * s, by - 4.6 * s, 0.6 * s, 4.8 * s); c.strokeRect(bx - 2.2 * s, by - 4.6 * s, 0.6 * s, 4.8 * s);
+      c.fillRect(bx + 1.6 * s, by - 4.6 * s, 0.6 * s, 4.8 * s); c.strokeRect(bx + 1.6 * s, by - 4.6 * s, 0.6 * s, 4.8 * s);
+      c.beginPath(); c.moveTo(bx - 3 * s, by - 4.4 * s); c.lineTo(bx, by - 6.4 * s); c.lineTo(bx + 3 * s, by - 4.4 * s); c.closePath(); c.fillStyle = '#C0675A'; c.fill(); c.stroke();
+      c.font = `${2.4 * s}px system-ui, "Apple Color Emoji", "Segoe UI Emoji"`; c.fillText('🔔', bx, by - 2.6 * s);
+      label(c, 'Village bell', bx, by + 1.6 * s, s, '#2B2233', '#FFE9A8');
+    }
     // street lamp posts (the bulbs are drawn live, since they turn on and off)
     for (const l of W.lamps) { const [x, y] = sc(l.x, l.y); c.fillStyle = '#4A3A30'; c.fillRect(x - 0.25 * s, y - 3.2 * s, 0.5 * s, 3.4 * s); }
   }
@@ -340,6 +351,15 @@
       ctx.beginPath(); ctx.arc(x, y, (k.errand || 2.8) * s * pulse, 0, 7); ctx.stroke(); ctx.setLineDash([]);
       ctx.font = `${2.2 * s}px system-ui, "Apple Color Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.e, x, y);
     }
+    // a tombstone, once you've found it (Wisps see it right away)
+    if (frame.tomb) {
+      const [tx, ty] = sc(frame.tomb[0], frame.tomb[1]);
+      ctx.fillStyle = 'rgba(70,52,40,.55)'; ctx.beginPath(); ctx.ellipse(tx, ty + 1.2 * s, 2.4 * s, 0.9 * s, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#B8B3C7'; ctx.strokeStyle = '#2B2233'; ctx.lineWidth = 0.35 * s;
+      roundRect(ctx, tx - 1.4 * s, ty - 2.2 * s, 2.8 * s, 3.4 * s, 1.2 * s); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = '#6C6A78'; ctx.lineWidth = 0.3 * s; ctx.beginPath(); ctx.moveTo(tx, ty - 1.6 * s); ctx.lineTo(tx, ty + 0.2 * s); ctx.moveTo(tx - 0.7 * s, ty - 1 * s); ctx.lineTo(tx + 0.7 * s, ty - 1 * s); ctx.stroke();
+      label(ctx, `${(P(frame.tomb[2]) || {}).name || '?'}`, tx, ty + 3 * s, s, '#2B2233', '#C9C2D6');
+    }
     const team = new Set(g.team || []);
     const seen = others();
     lastSeen = seen; lastLamps = lamps;
@@ -400,6 +420,8 @@
   function roleIcon(g) { const r = api.role(g.myRole); return (r && r.icon) || '✅'; }
   function nextTask() {
     if (!me) return null;
+    const bell = tasks.find((t) => t.k === 'bell' && !t.done);
+    if (bell && !(frame && frame.rung)) return bell;
     return tasks.filter((t) => !t.done && t.errand && t.x !== undefined).sort((a, b) => dist(me, a) - dist(me, b))[0] || null;
   }
   function arrowTo(t, s, sc) {
@@ -430,6 +452,7 @@
       m.font = `${9 * s}px system-ui, "Apple Color Emoji"`; m.textAlign = 'center'; m.textBaseline = 'middle';
       for (const l of g.world.landmarks) m.fillText(l.e, l.x * s, l.y * s);
       for (const h of g.world.homes) { m.fillStyle = h.id === api.me() ? '#FF6B8B' : '#E9DFC9'; m.fillRect((h.x - 2) * s, (h.y - 2) * s, 4 * s, 4 * s); }
+      if (g.world.bell) { m.font = `${7 * s}px system-ui, "Apple Color Emoji"`; m.fillText('🔔', g.world.bell.x * s, g.world.bell.y * s); }
     }
     c.clearRect(0, 0, w, w); c.drawImage(miniStatic, 0, 0);
     for (const l of lamps) { c.fillStyle = l.lit ? '#FFD66B' : '#6C6A78'; c.beginPath(); c.arc(l.x * s, l.y * s, 1.6 * s, 0, 7); c.fill(); }
@@ -438,6 +461,7 @@
       c.fillStyle = '#9BE37B'; c.strokeStyle = '#2B2233'; c.lineWidth = 0.8 * s;
       c.beginPath(); c.arc(t.x * s, t.y * s, 2.2 * s, 0, 7); c.fill(); c.stroke();
     }
+    if (frame.tomb) { c.font = `${8 * s}px system-ui, "Apple Color Emoji"`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('🪦', frame.tomb[0] * s, frame.tomb[1] * s); }
     if (me && frame.me) { c.fillStyle = '#fff'; c.strokeStyle = '#FF6B8B'; c.lineWidth = 1.4 * s; c.beginPath(); c.arc(me.x * s, me.y * s, 2.6 * s, 0, 7); c.fill(); c.stroke(); }
   }
 
@@ -464,6 +488,8 @@
         .map((x) => ({ x, d: dist(me, x.door) })).filter((x) => x.d <= (k.house || 6)).sort((a, b) => a.d - b.d)[0];
       if (h) return { kind: 'house', text: `${g.myRole === 'trickster' ? 'Meddle with' : role.verb.split(' ')[0]} ${P(h.x.id)?.name}` };
     }
+    if (frame.tomb && !frame.rung && frame.bells > 0 && g.world.bell && dist(me, g.world.bell) <= 3.6)
+      return { kind: 'bell', text: `Ring the bell (${frame.bells} ring${frame.bells === 1 ? '' : 's'} left this game)` };
     const l = lamps.map((x) => ({ ...x, d: dist(me, x) })).filter((x) => x.d <= (k.lampR || 3.4)).sort((a, b) => a.d - b.d)[0];
     if (l && !l.lit) return { kind: 'lamp', text: 'Light the lamp' };
     if (l && l.lit && sneak) return { kind: 'blow', text: 'Blow out the lamp', danger: true };
@@ -507,7 +533,8 @@
     const open = isTasksOpen();
     const next = tasks.find((t) => !t.done && t.k !== 'info');
     el.classList.toggle('open', open);
-    el.innerHTML = `<div class="tk-head">📝 Tonight <b>${done}/${real.length}</b><span class="tk-tog">${open ? '▲' : '▼'}</span></div>`
+    const bells = frame && frame.bells !== undefined ? frame.bells : (G() && G().bellsLeft);
+    el.innerHTML = `<div class="tk-head">📝 Tonight <b>${done}/${real.length}</b>${bells !== undefined ? `<span class="tk-bell" title="Bell rings left this game">🔔 ${bells}</span>` : ''}<span class="tk-tog">${open ? '▲' : '▼'}</span></div>`
       + (open ? `<ul>${tasks.map(taskLi).join('')}</ul><div class="tk-foot">Errands: stand on the glowing ✨ spot. Finish them all for a brighter lantern.</div>`
         : next ? `<div class="tk-next">${next.e} ${esc(next.text)}</div>` : '<div class="tk-next">✨ All done! Keep your eyes open.</div>');
   }
@@ -563,7 +590,8 @@
       c.strokeStyle = '#FF4F7A'; c.lineWidth = 0.7 * s; c.setLineDash([1.2 * s, 0.8 * s]);
       c.beginPath(); c.arc(x, y, 3.2 * s, 0, 7); c.stroke(); c.setLineDash([]);
       c.font = `${3 * s}px system-ui, "Apple Color Emoji"`; c.textAlign = 'center'; c.textBaseline = 'middle';
-      c.fillText(sc.mole ? '🕳️' : '💨', x, y);
+      c.fillText('🪦', x, y);
+      if (sc.mole) { c.font = `${2 * s}px system-ui, "Apple Color Emoji"`; c.fillText('🕳️', x + 2.4 * s, y + 1.6 * s); }
     }
     for (const o of g.outs || []) {
       if (!full && Math.abs(until - o.t) > 14) continue;
@@ -573,5 +601,5 @@
   }
 
   window.HHNight = { start, stop, onFrame, drawTracks, setTasks, tasks: getTasks, running: () => running,
-    _dbg: () => ({ me: me && { ...me }, tasks, hold: !!localHold, lit: litLocal, frames: buf.length }) };
+    _dbg: () => ({ me: me && { ...me }, tasks, hold: !!localHold, lit: litLocal, frames: buf.length, seen: lastSeen.map((q) => ({ id: q.id, x: q.x, y: q.y })), team: (G() || {}).team || [], tomb: frame && frame.tomb, bell: G() && G().world && G().world.bell }) };
 })();

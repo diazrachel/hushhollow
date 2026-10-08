@@ -40,17 +40,30 @@
     tab: 'board', chatCh: 'day', composer: 'hint', muted: new Set(), phaseKey: '', phaseStart: 0,
     hints: {}, overShown: null, seenChat: 0, lastDeaths: 0, built: { lobby: false },
   };
+  let retryTimer = 0;
   function connect() {
     ws = new WebSocket(`${location.protocol === 'https:' ? 'wss://' : 'ws://'}${location.host}/ws`);
     ws.onopen = () => { retry = 0; $('#conn').classList.add('hidden'); send({ t: 'hello', token, profile: pubProfile() }); };
     ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
-    ws.onclose = () => { $('#conn').classList.remove('hidden'); setTimeout(connect, Math.min(8000, 500 * 2 ** retry++)); };
+    ws.onclose = () => { $('#conn').classList.remove('hidden'); clearTimeout(retryTimer); retryTimer = setTimeout(connect, Math.min(8000, 500 * 2 ** retry++)); };
   }
+  function showRejoin(r) {
+    let el = $('#rejoin-card');
+    if (!r) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement('section'); el.id = 'rejoin-card'; el.className = 'card rejoin-card'; $('#home').insertBefore(el, $('#home').children[1]); }
+    el.innerHTML = `<div><b>🔙 Your game is still going!</b><p class="small muted" style="margin:.2rem 0 0">An AI critter is keeping ${esc(r.name)}'s seat warm in burrow <b>${esc(r.code)}</b>.</p></div>
+      <button class="btn primary" id="rejoin-btn">Rejoin game</button>`;
+    $('#rejoin-btn').onclick = () => { send({ t: 'rejoin' }); el.remove(); };
+  }
+  function reconnectNow() { if (ws && (ws.readyState === 0 || ws.readyState === 1)) return; clearTimeout(retryTimer); retry = 0; connect(); }
+  window.addEventListener('online', reconnectNow);
+  document.getElementById('conn-retry').addEventListener('click', reconnectNow);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reconnectNow(); });
   function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
 
   function onMsg(m) {
     if (m.t === 'state') { offset = m.now - Date.now(); const prev = S; S = m; onState(prev); }
-    else if (m.t === 'home') { S = null; showScreen('home'); urlJoin(); }
+    else if (m.t === 'home') { S = null; showScreen('home'); closeAllModals(); showRejoin(m.rejoin); urlJoin(); }
     else if (m.t === 'error') toast(m.text);
     else if (m.t === 'kicked') { toast('The host removed you from the burrow.'); S = null; showScreen('home'); }
     else if (m.t === 'nf') { if (window.HHNight) window.HHNight.onFrame(m); }
@@ -334,7 +347,7 @@
   const teamClass = (team) => (team === 'sneaks' ? 'sneaks' : team === 'village' ? 'village' : 'solo');
 
   function onState(prev) {
-    if (!S.game) { ui.gameId = null; renderLobby(); return; }
+    if (!S.game) { if (ui.gameId) closeAllModals(); ui.gameId = null; renderLobby(); return; }
     const g = S.game;
     const gameId = S.code + g.houses.join('');
     if (ui.gameId !== gameId) {
@@ -405,7 +418,7 @@
     $('#sound-btn').textContent = profile.sound ? '🔔' : '🔕';
     $('#leave-btn').onclick = () => {
       const over = S && S.game && S.game.phase === 'over';
-      if (over || confirm('Leave this game? An AI critter will take your seat.')) send({ t: 'leave' });
+      if (over || confirm('Leave this game? An AI critter will keep your seat, and you can rejoin from the home screen.')) send({ t: 'leave' });
     };
     $('#action-card').addEventListener('click', onActionClick);
     $('#action-card').addEventListener('change', (e) => { if (e.target.id === 'meddle-sel') send({ t: 'night', kind: 'meddle', target: e.target.value || null }); });
@@ -878,8 +891,10 @@
     } else body = `<div class="splash-txt" style="margin:.6rem 0">${e.night <= 1 || (e.saved === false && !died.length && g.day <= 2 && e.night === 1) ? '🌼 A quiet night in the Hollow.' : e.saved ? '🦔 Everyone is safe! Someone was protected.' : '🌼 Everyone woke up safe.'}</div>`;
     const outs = (e.outs || []).length ? `<li>🌑 Lanterns went dark near ${e.outs.map((o) => `${esc(o.zone)} (${o.when})`).join(', ')}</li>` : '';
     const lampOuts = (e.lampOuts || []).length ? `<li>💨 A street lamp was blown out near ${e.lampOuts.map((o) => esc(o.zone)).join(', ')}</li>` : '';
-    const clues = e.zone || outs || lampOuts ? `<div class="scene-box"><b>🔍 What the village noticed</b><ul>
-      ${e.zone ? `<li>📍 It happened near <b>${esc(e.zone)}</b>${(g.scenes || []).some((x) => x.night === e.night && x.mole) ? ' and there were no footprints, just fresh dirt 🕳️' : ''}</li>` : ''}${outs}${lampOuts}</ul>
+    const b = e.bell;
+    const bellLi = b ? `<li>🔔 <b>${nm(b.by)}</b> rang the bell after finding ${nm(b.victim)}'s tombstone. ${b.near.length ? `When it rang, closest to the tombstone: ${b.near.map((x) => `<b>${nm(x.id)}</b> (${esc(x.how)})`).join(', ')}.` : 'Nobody was near the tombstone when it rang.'} <span class="muted">${b.left} ring${b.left === 1 ? '' : 's'} left this game.</span></li>` : '';
+    const clues = e.zone || outs || lampOuts || bellLi ? `<div class="scene-box"><b>🔍 What the village noticed</b><ul>${bellLi}
+      ${e.zone ? `<li>🪦 A tombstone stands near <b>${esc(e.zone)}</b>${(g.scenes || []).some((x) => x.night === e.night && x.mole) ? ' and there were no footprints, just fresh dirt 🕳️' : ''}</li>` : ''}${outs}${lampOuts}</ul>
       <p class="small muted" style="margin:.3rem 0 0">👣 Last night's footprints are on the village map. Drag the slider to replay who walked where, and when.</p></div>` : '';
     const lit = (e.lit || []).length ? `<p class="small" style="text-align:center">🏮 A lantern now glows at ${e.lit.map((x) => `${nm(x)}'s house`).join(' and ')} for tonight.</p>` : '';
     const learnedHTML = learned.length && g.alive.includes(S.me) ? `<h3 style="margin-top:1rem">🔮 What you learned</h3>${learned.map((l) => { const t = l.text.replace(/^Night \d+: /, ''); return `<div class="secret new"><span>${esc(t.charAt(0).toUpperCase() + t.slice(1))}</span></div>`; }).join('')}` : '';
@@ -927,7 +942,8 @@
       const walkLine = '';
       const sceneLine = h.scene ? `<li>🔍 ${h.scene.map(esc).join(' ')}</li>` : '';
       const extra = walkLine + sceneLine + (h.meddles || []).map((m) => `<li>🎭 ${nm(m.by)} meddled with ${nm(m.target)}</li>`).join('')
-        + (h.lit || []).map((x) => `<li>🏮 A lantern glowed at ${nm(x)}'s house</li>`).join('');
+        + (h.lit || []).map((x) => `<li>🏮 A lantern glowed at ${nm(x)}'s house</li>`).join('')
+        + (h.bell ? `<li>🔔 ${nm(h.bell.by)} rang the bell${h.bell.near.length ? `; closest: ${h.bell.near.map((x) => nm(x.id)).join(', ')}` : ''}</li>` : '');
       return `<div class="recap-night"><b>Night ${h.night}</b>${h.kill ? ` · Sneaks targeted ${nm(h.kill)}${h.saved ? ' (saved! 🦔)' : ''}` : ''}<ul>${items || '<li>Nobody went out.</li>'}${extra}</ul></div>`;
     }).join('');
     const m = modal(`<div class="gameover"><p class="winner ${o.winner}">${o.winner === 'village' ? '🏡 Village wins!' : '🌑 Sneaks win!'}</p>
@@ -935,7 +951,7 @@
       <h3>Who was who</h3><div class="reveal-grid">${reveal}</div>
       <details class="recap"><summary>📜 What really happened each night</summary>${recap}</details>
       <div class="row" style="justify-content:center;margin-top:1.2rem">
-        ${host ? '<button class="btn primary big" data-go="again">Play again</button>' : '<span class="muted" style="font-weight:800">Waiting for the host to start a new round…</span>'}
+        <button class="btn primary big" data-go="again">🔁 Play again</button>
         <button class="btn" data-go="map">View the map</button><button class="btn" data-go="leave">Leave</button></div></div>`, 'wide', 'over');
     m.addEventListener('click', (e) => {
       const b = e.target.closest('[data-go]'); if (!b) return;

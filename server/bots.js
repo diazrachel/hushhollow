@@ -112,8 +112,24 @@ function think(room, p, b, dt) {
     if (n.t >= b.spyAt && n.t < b.spyAt + b.spyFor && me.lit) Night.input(room, id, { t: 'lantern', on: false });
     else if (n.t >= b.spyAt + b.spyFor && !me.lit) { Night.input(room, id, { t: 'lantern', on: true }); b.spyAt = Infinity; }
   }
-  // ---- abilities: walk to the target's door and hold ----
+  // ---- found a tombstone? run and ring the bell (Sneaks sometimes do it too, to look innocent) ----
   const role = g.roles[id];
+  if (n.tomb && n.found.has(id) && !n.bell && g.bellsLeft > 0) {
+    if (b.ring === undefined) {
+      const sneak = isSneakTeam(role);
+      b.ring = Math.random() < (sneak ? (b.striker ? 0.2 : 0.3) : careless ? 0.5 : 0.85);
+      b.ringAfter = n.t + (sneak ? 3 + Math.random() * 5 : 0.4 + Math.random() * 1.2);
+    }
+    if (b.ring && n.t >= b.ringAfter) {
+      const bell = g.world.bell;
+      if (dist(me, bell) <= Night.BELL_RANGE - 1) {
+        const ht = Night.holdTarget(room, id);
+        if (ht && ht.kind === 'bell') { me.dx = 0; me.dy = 0; Night.input(room, id, { t: 'hold', on: true }); return; }
+      }
+      b.goal = { x: bell.x, y: bell.y }; b.task = null; steer(room, id, b); return;
+    }
+  }
+  // ---- abilities: walk to the target's door and hold ----
   const wantsHouse = (b.plan.ability && !(id in g.actions)) || (b.plan.meddle && !(id in g.meddles) && !g.settling);
   const houseTarget = b.plan.ability || b.plan.meddle;
   if (wantsHouse && houseTarget && g.alive.has(houseTarget) && !n.gone.has(houseTarget) && n.t > 2) {

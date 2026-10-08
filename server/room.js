@@ -100,8 +100,10 @@ class Room {
     const p = this.get(id); if (!p) return;
     if (this.game && this.game.phase !== 'over') {
       // Mid-game: keep the seat, hand it to a sleepy AI so the game stays fair.
-      p.isAI = true; p.aiLevel = 'sleepy'; p.ws = null; p.token = null; p.connected = true; p.dropped = true;
-      this.log(`${p.name} ${reason}. A sleepy AI critter took their seat.`);
+      const keep = reason === 'left'; // someone who walked out can come back; someone kicked can't
+      p.isAI = true; p.aiLevel = 'sleepy'; p.ws = null; p.connected = true; p.dropped = true;
+      if (keep) p.leftAt = Date.now(); else p.token = null;
+      this.log(`${p.name} ${reason}. A sleepy AI critter took their seat${keep ? ' (they can rejoin)' : ''}.`);
     } else {
       this.players = this.players.filter((x) => x.id !== id);
       this.sys(`${p.name} ${reason}.`);
@@ -145,9 +147,11 @@ class Room {
       }
       case 'start': if (isHost) this.start(); return;
       case 'again': {
-        if (!isHost || !g || g.phase !== 'over') return;
+        if (!g || g.phase !== 'over') return; // anyone can head back to the lobby once the game is over
         this.clearTimers(); this.game = null; this.autoStartAt = null;
+        for (const x of this.players) if (x.dropped && x.token) this.hub.forget(x.token);
         this.players = this.players.filter((x) => !x.dropped);
+        this.sys(`${p.name} brought everyone back to the lobby.`);
         this.sys('Back in the lobby. Same burrow, new game.');
         return this.changed();
       }
@@ -299,7 +303,7 @@ class Room {
       g.phase = 'night'; g.endsAt = Date.now();
       setImmediate(() => {
         if (this.game !== g) return;
-        for (let t = 0; t < g.nightDur; t += Night.TICK) Night.tick(this, Night.TICK);
+        for (let t = 0; t < g.nightDur; t += Night.TICK) { Night.tick(this, Night.TICK); if (g.night.endNow) break; }
         this.endNight();
       });
       return;
@@ -319,6 +323,11 @@ class Room {
         }
       } catch (e) { console.error('[night]', e); }
     }, Night.TICK * 1000);
+  }
+  // Someone rang the village bell: the night ends in a moment
+  bellRung() {
+    if (ENV_MULT < 1) return; // the fast simulation loop stops by itself
+    this.shorten(2.5);
   }
   nextNight() { this.game.day++; this.log(`Night ${this.game.day} falls.`); this.startNight(); }
 
@@ -397,6 +406,13 @@ class Room {
       g.scenes.push(scene);
       rec.visits.push({ from: st.by, to: st.victim, kind: 'kill', hidden: scene.mole });
     }
+    // The bell: who rang it, and who was closest to the tombstone at that moment (public)
+    let bell = null;
+    if (n.bell) {
+      const how = (d) => (d <= 6 ? 'right next to it' : d <= 13 ? 'close by' : 'not far');
+      bell = { by: n.bell.by, victim: n.bell.victim, near: n.bell.near.map((x) => ({ id: x.id, how: how(x.d) })), left: g.bellsLeft };
+      rec.bell = bell;
+    }
     g.trackLog[night] = g.tracks;
     rec.scene = scene ? [`near ${scene.zone}`] : null;
     rec.culprit = st ? st.by : null;
@@ -404,10 +420,11 @@ class Room {
 
     // Deaths
     for (const id of died) this.kill(id, 'night');
-    g.events.push({ id: g.eventSeq++, type: 'dawn', night, died, saved: rec.saved, lit: [], zone: scene ? scene.zone : null, outs: g.outs, lampOuts: g.lampOuts });
+    g.events.push({ id: g.eventSeq++, type: 'dawn', night, died, saved: rec.saved, lit: [], zone: scene ? scene.zone : null, outs: g.outs, lampOuts: g.lampOuts, bell });
     if (died.length) this.log(`Dawn. ${died.map((d) => this.name(d)).join(', ')} was spirited away near ${scene.zone}${scene.mole ? '. There were no footprints, only fresh dirt 🕳️' : ''}. Their notepad was left behind.`);
     else if (rec.saved) this.log('Dawn. Everyone is safe. Someone was protected in the night!');
     else this.log('Dawn. Everyone woke up safe.');
+    if (bell) this.log(`🔔 ${this.name(bell.by)} rang the bell after finding ${this.name(bell.victim)}'s tombstone. ${bell.near.length ? `When it rang, closest to the tombstone: ${bell.near.map((x) => `${this.name(x.id)} (${x.how})`).join(', ')}.` : 'When it rang, nobody was near the tombstone.'} ${bell.left} bell ring${bell.left === 1 ? '' : 's'} left this game.`);
     if (g.outs.length) this.log(`🏮 Lanterns went dark tonight near ${g.outs.map((o) => `${o.zone} (${o.when})`).join(', ')}.`);
     if (g.lampOuts.length) this.log(`💨 A street lamp was blown out near ${g.lampOuts.map((o) => o.zone).join(', ')}.`);
     g.settleLeft = Math.max(0, (g.settleLeft || 0) - 1);
@@ -599,6 +616,7 @@ class Room {
       myAction: g.actions[pid] || null,
       world: g.world, nightDur: g.nightDur, scenes: g.scenes, tracks: g.phase === 'night' ? [] : g.tracks, outs: g.outs,
       nightConst: { light: Night.LIGHT, keen: Night.LIGHT_KEEN, dark: Night.DARK_SIGHT, lamp: Night.LAMP_LIGHT, porch: Night.PORCH_LIGHT, strike: Night.STRIKE_RANGE, house: Night.HOUSE_RANGE, lampR: Night.LAMP_RANGE, speed: Night.SPEED, hold: Night.HOLD_TIME, errand: Night.ERRAND_RANGE },
+      bellsLeft: g.bellsLeft === undefined ? (g.n >= 8 ? 3 : 2) : g.bellsLeft,
       nightTasks: g.phase === 'night' && g.night && g.night.tasks ? g.night.tasks[pid] || null : null,
       attempted: isSneakTeam(role) && g.night ? !!g.night.attempted : undefined,
       iReady: g.ready.has(pid), lastProtect: g.lastProtect[pid] || null, lastLight: g.lastLight[pid] || null,

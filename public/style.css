@@ -599,3 +599,7 @@ li.done .tk-box { background: #7FD06A; color: #fff; }
 .nb-banner .bn-e { font-size: 1.5em; }
 .nb-prompt.errand { background: #DFF6CF; }
 @media (max-width: 560px) { .nb-banner { bottom: 70px; font-size: .78rem; padding: .35rem .6rem; max-width: 78%; } .nb-banner.big { font-size: .85rem; padding: .45rem .7rem; } .nb-banner .bn-e { font-size: 1.25em; } .nb-tasks { font-size: .74rem; padding: .35rem .5rem; } }
+.conn { display: flex; align-items: center; gap: .6rem; }
+.conn-btn { border: 2.5px solid var(--ink); border-radius: 999px; background: #FFF8EC; color: var(--ink); font-weight: 800; padding: .15rem .7rem; cursor: pointer; font-family: inherit; }
+.rejoin-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: #FFE9A8; }
+.nb-tasks .tk-bell { font-size: .78rem; font-family: var(--body, inherit); background: #FFE9A8; border: 2px solid #2B2233; border-radius: 999px; padding: 0 .4rem; }
