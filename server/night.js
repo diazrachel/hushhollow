@@ -17,7 +17,12 @@ const DARK_SIGHT = 3.2;       // how far you can see with your lantern off
 const RECOGNIZE_LIT = 10.5;   // you can make out a lantern-lit critter a little beyond your own light
 const LAMP_LIGHT = 8;         // street lamp radius
 const PORCH_LIGHT = 11;       // Lantern Keeper's porch light radius
-const STRIKE_RANGE = 3.4;
+const STRIKE_RANGE = 3.4;     // (used by the hint "get closer"; the real check is touching, below)
+const BODY_R = { small: 1.55, medium: 1.95, large: 2.4 }; // drawn critter sizes, same as the browser
+const TOUCH_OVERLAP = 0.35;   // bodies must overlap a little (about 10% of a critter)
+const STRIKE_LAG = 0.7;       // seconds of position history the server checks (what you saw was a moment old)
+const STRIKE_SLACK = 0.9;
+const HEAR_RANGE = 16;        // a strike makes a muffled squeak that critters this close can hear     // extra distance allowed for network wobble
 const HOLD_TIME = { strike: 1.4, house: 1.5, lamp: 1.4, blow: 0.8, bell: 1.0 };
 const BELL_RANGE = 3.6;
 const BELL_NEAR = 25;          // the morning report names who was this close to the tombstone when the bell rang
@@ -107,7 +112,7 @@ function begin(room) {
     t: 0, tick: 0, pos, gone: new Set(), lamps: world.lamps.map((l) => ({ ...l, lit: false })), porches: new Set(), protected: new Set(),
     tracks: [], strike: null, attempted: false, seen: {}, outs: [], visits: {}, witness: {}, zoneTime: {}, bot: {}, lampLog: [],
     tasks: {}, tkVer: {}, tkSent: {}, ev: {}, fix: {},
-    tomb: null, found: new Set(), foundAt: {}, bell: null, endNow: false,
+    tomb: null, found: new Set(), foundAt: {}, bell: null, endNow: false, heard: {},
   };
   if (g.bellsLeft === undefined) g.bellsLeft = g.n >= 8 ? 3 : 2;
   if (!g.world.bell) g.world.bell = { x: 50, y: POND.y - POND.ry - 4.2 };
@@ -137,7 +142,7 @@ function makeTasks(room, id) {
   const g = room.game, w = g.world, list = [];
   const role = g.roles[id], sneak = isSneakTeam(role), ability = ROLES[role].night;
   if (!sneak && ROLE_TASK[ability]) list.push({ k: 'role', text: ROLE_TASK[ability][0], e: ROLE_TASK[ability][1], done: false });
-  if (sneak && !g.settling) list.push({ k: 'strike', text: 'Spirit someone away: lantern off, get close, hold E (not in lamplight)', e: '🌑', done: false });
+  if (sneak && !g.settling) list.push({ k: 'strike', text: 'Spirit someone away: lantern off, touch them, press F (not in lamplight)', e: '🌑', done: false });
   if (sneak && g.settling) list.push({ k: 'info', text: 'Settling-in night: no strikes tonight. Blend in!', e: '🌙', done: false });
   if (role === 'trickster' && !g.settling) list.push({ k: 'meddle', text: 'Meddle with a critter: hold E at their door', e: '🎭', done: false });
   // errands: a random mix of landmarks, the pond, a neighbour's door, and a street lamp
@@ -200,14 +205,6 @@ function holdTarget(room, id) {
   const g = room.game, n = g.night, p = n.pos[id], role = g.roles[id];
   if (!p) return null;
   const sneak = isSneakTeam(role);
-  if (sneak && !g.settling && !n.attempted && !p.lit) {
-    let best = null, bd = STRIKE_RANGE;
-    for (const [qid, q] of Object.entries(n.pos)) {
-      if (qid === id || n.gone.has(qid) || isSneakTeam(g.roles[qid])) continue;
-      const d = dist(p, q); if (d <= bd) { bd = d; best = qid; }
-    }
-    if (best) return { kind: 'strike', target: best };
-  }
   const ability = ROLES[role].night;
   const canHouse = (ability && !sneak && !(id in g.actions)) || (role === 'trickster' && !(id in g.meddles) && !g.settling);
   if (canHouse) {
@@ -227,6 +224,27 @@ function holdTarget(room, id) {
     if (sneak) return { kind: 'blow', target: i };
   }
   return null;
+}
+
+// Two critters are "touching" when their drawn bodies overlap a little
+function touchDist(room, a, b) {
+  const sa = SIZE[(room.get(a) || {}).critter] || 'medium', sb = SIZE[(room.get(b) || {}).critter] || 'medium';
+  return BODY_R[sa] + BODY_R[sb] - TOUCH_OVERLAP;
+}
+// Can `id` spirit away `target` right now? (one press of F, no holding)
+function canStrike(room, id, target, slack = STRIKE_SLACK) {
+  const g = room.game, n = g.night, p = n.pos[id], q = n.pos[target];
+  if (!p || !q || id === target || n.gone.has(id) || n.gone.has(target) || !g.alive.has(target)) return false;
+  if (!isSneakTeam(g.roles[id]) || isSneakTeam(g.roles[target]) || g.settling || n.attempted || p.lit) return false;
+  const reach = touchDist(room, id, target) + slack;
+  // check where the target was over the last moment, since that's what the Sneak saw on their screen
+  const hist = (q.hist || []).filter((h) => n.t - h[0] <= STRIKE_LAG).concat([[n.t, q.x, q.y]]);
+  return hist.some(([, x, y]) => Math.hypot(p.x - x, p.y - y) <= reach && !inStaticLight(g, { x, y }));
+}
+function strike(room, id, target) {
+  if (!canStrike(room, id, target)) return false;
+  completeHold(room, id, { kind: 'strike', target });
+  return true;
 }
 
 function input(room, id, m) {
@@ -250,6 +268,7 @@ function input(room, id, m) {
     if (Math.hypot(q.x - x, q.y - y) > 1.5) n.fix[id] = true; // tell that browser where it really is
     return;
   }
+  if (m.t === 'strike') { strike(room, id, String(m.target || '')); return; }
   if (m.t === 'move') {
     let dx = Number(m.dx) || 0, dy = Number(m.dy) || 0;
     const len = Math.hypot(dx, dy);
@@ -310,6 +329,15 @@ function completeHold(room, id, h) {
     n.strike = { by: id, victim: v, x: vp.x, y: vp.y, t: n.t, zone, saved: false };
     n.gone.add(v); vp.hold = null; vp.dx = 0; vp.dy = 0;
     n.tomb = { x: +vp.x.toFixed(1), y: +vp.y.toFixed(1), victim: v, t: n.t };
+    // a muffled squeak: anyone close enough hears it (and sees roughly where), but not who
+    n.heard = {};
+    for (const oid of Object.keys(n.pos)) {
+      if (oid === id || oid === v || n.gone.has(oid) || isSneakTeam(g.roles[oid])) continue;
+      if (dist(n.pos[oid], vp) <= HEAR_RANGE) {
+        n.heard[oid] = { x: +vp.x.toFixed(1), y: +vp.y.toFixed(1), until: n.t + 4 };
+        n.ev[oid].push({ e: '❗', big: true, text: 'You heard a muffled squeak nearby! Go look…' });
+      }
+    }
     n.found.add(id); n.foundAt[id] = n.t; // the culprit knows exactly where it is
     if (vp.lit) n.outs.push({ x: vp.x, y: vp.y, t: n.t, id: v });
     vp.lit = false;
@@ -336,6 +364,8 @@ function tick(room, dt) {
     }
     const moved = Math.hypot(p.x - ox, p.y - oy);
     p.tx = p.x; p.ty = p.y;
+    (p.hist || (p.hist = [])).push([n.t, p.x, p.y]);
+    if (p.hist.length > 26) p.hist.shift();
     // errands
     const tasks = n.tasks[id];
     if (tasks) {
@@ -438,6 +468,7 @@ function frameFor(room, viewerId) {
   };
   if (n.tomb && (wisp || n.found.has(viewerId))) out.tomb = [n.tomb.x, n.tomb.y, n.tomb.victim];
   out.bells = g.bellsLeft; if (n.bell) out.rung = 1;
+  const hd = n.heard && n.heard[viewerId]; if (hd && n.t <= hd.until) out.ping = [hd.x, hd.y];
   if (n.tasks[viewerId] && n.tkSent[viewerId] !== n.tkVer[viewerId]) { out.tasks = n.tasks[viewerId]; n.tkSent[viewerId] = n.tkVer[viewerId]; }
   if (n.ev[viewerId] && n.ev[viewerId].length) { out.ev = n.ev[viewerId]; n.ev[viewerId] = []; }
   if (n.fix[viewerId] && me) { out.fix = 1; n.fix[viewerId] = false; }
@@ -468,6 +499,7 @@ function summarize(room, meddled = new Set()) {
     else text = `Night ${night}: you were around ${zones.slice(0, 2).join(' and ')}. You saw ${seen.map((s) => `${name(s.id)} (${spot(s)}${s.dark ? ', lantern OFF 🌑' : ''})`).join(', ')}.`;
     room.priv(o, text, { sight: { night, zones, seen } });
     if (n.tomb && n.found.has(o) && o !== (n.strike && n.strike.by)) room.priv(o, `Night ${night}: 🪦 you found ${name(n.tomb.victim)}'s tombstone near ${zoneOf(g.world, n.tomb, name)} (${when(n.foundAt[o])}).`, { found: { night, at: n.foundAt[o] } });
+    if (n.heard && n.heard[o] && !n.found.has(o)) room.priv(o, `Night ${night}: ❗ you heard a muffled squeak near ${zoneOf(g.world, n.heard[o], name)}.`);
     const w = n.witness[o];
     if (w) room.priv(o, `Night ${night}: 😱 you SAW ${name(w.by)} spirit away ${name(w.victim)} near ${w.zone}!`, { witness: { night, by: w.by, victim: w.victim } });
   }
@@ -479,6 +511,6 @@ function summarize(room, meddled = new Set()) {
 
 module.exports = {
   TICK, FRAME_EVERY, LIGHT, LIGHT_KEEN, ERRAND_RANGE, ERRAND_TIME, DARK_SIGHT, LAMP_LIGHT, PORCH_LIGHT, STRIKE_RANGE, HOLD_TIME, HOUSE_RANGE, LAMP_RANGE, SPEED,
-  BELL_RANGE, BELL_NEAR, ringBell,
+  HEAR_RANGE, BELL_RANGE, BELL_NEAR, ringBell, strike, canStrike, touchDist,
   begin, tick, input, frameFor, summarize, holdTarget, recognizes, inStaticLight, zoneOf, blocked, dist, buildWorld, LANDMARKS,
 };

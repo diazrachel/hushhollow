@@ -67,7 +67,7 @@
     canvas.addEventListener('pointermove', onPointer);
     ['pointerup', 'pointercancel', 'pointerleave'].forEach((e) => canvas.addEventListener(e, () => { touchDir = null; }));
     const act = $('#nb-act');
-    act.addEventListener('pointerdown', (e) => { e.preventDefault(); setHold(true); });
+    act.addEventListener('pointerdown', (e) => { e.preventDefault(); if (lastPrompt && lastPrompt.kind === 'strike') tryStrike(); else setHold(true); });
     ['pointerup', 'pointercancel', 'pointerleave'].forEach((e) => act.addEventListener(e, () => setHold(false)));
     $('#nb-lantern').addEventListener('click', toggleLantern);
     $('#nb-tasks').addEventListener('click', () => { tasksOpen = !isTasksOpen(); renderTasks(); });
@@ -80,6 +80,7 @@
     if (move.includes(k)) { e.preventDefault(); if (e.type === 'keydown') keys.add(k); else keys.delete(k); }
     if (k === 'e' || k === ' ') { e.preventDefault(); if (e.type === 'keydown' && !e.repeat) setHold(true); if (e.type === 'keyup') setHold(false); }
     if ((k === 'q' || k === 'l') && e.type === 'keydown' && !e.repeat) toggleLantern();
+    if (k === 'f' && e.type === 'keydown' && !e.repeat) { e.preventDefault(); tryStrike(); }
     if (k === 't' && e.type === 'keydown' && !e.repeat) { tasksOpen = !isTasksOpen(); renderTasks(); }
   }
   function onPointer(e) {
@@ -105,6 +106,15 @@
     api.send({ t: 'hold', on }); lastHoldSend = performance.now();
     localHold = null;
     if (on) startLocalHold();
+  }
+  let lastPrompt = null, lastStrikeAt = 0;
+  function tryStrike() {
+    const g = G(); if (!g || !frame) return;
+    const pr = prompt(g, lastSeen, lastLamps);
+    if (!pr || pr.kind !== 'strike' || performance.now() - lastStrikeAt < 400) return;
+    lastStrikeAt = performance.now();
+    flushPos(true); // the server checks from exactly where you are
+    api.send({ t: 'strike', target: pr.target });
   }
   function startLocalHold() {
     const g = G(); const pr = g && frame && prompt(g, lastSeen, lastLamps);
@@ -351,6 +361,12 @@
       ctx.beginPath(); ctx.arc(x, y, (k.errand || 2.8) * s * pulse, 0, 7); ctx.stroke(); ctx.setLineDash([]);
       ctx.font = `${2.2 * s}px system-ui, "Apple Color Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.e, x, y);
     }
+    // you heard a squeak: a pulsing ❗ where it came from
+    if (frame.ping && !wisp) {
+      const [px, py] = sc(frame.ping[0], frame.ping[1]), pulse = 1 + Math.sin(now / 120) * 0.15;
+      ctx.strokeStyle = 'rgba(255,79,122,.85)'; ctx.lineWidth = 0.45 * s; ctx.beginPath(); ctx.arc(px, py, 3.2 * s * pulse, 0, 7); ctx.stroke();
+      ctx.font = `${3 * s}px system-ui, "Apple Color Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('❗', px, py);
+    }
     // a tombstone, once you've found it (Wisps see it right away)
     if (frame.tomb) {
       const [tx, ty] = sc(frame.tomb[0], frame.tomb[1]);
@@ -417,6 +433,11 @@
     drawMini(g, lamps);
     updateHud(g, seen, lamps, prog);
   }
+  function inLight(g, q, lamps) {
+    const k = g.nightConst || {};
+    if (lamps.some((l) => l.lit && dist(l, q) <= (k.lamp || 8))) return true;
+    return (frame.porches || []).some((hid) => { const h = g.world.homes.find((x) => x.id === hid); return h && dist(h.door, q) <= (k.porch || 11); });
+  }
   function roleIcon(g) { const r = api.role(g.myRole); return (r && r.icon) || '✅'; }
   function nextTask() {
     if (!me) return null;
@@ -473,12 +494,17 @@
     const team = new Set(g.team || []);
     const tk = (kk) => tasks.find((t) => t.k === kk);
     const struck = frame.struck || (tk('strike') && tk('strike').done);
-    if (sneak && !g.settling && !struck && !lit) {
-      const v = seen.filter((q) => !team.has(q.id)).find((q) => dist(me, q) <= (k.strike || 3.4));
-      if (v) return { kind: 'strike', text: `Spirit away ${P(v.id)?.name}`, danger: true };
-    } else if (sneak && !g.settling && !struck && lit) {
-      const v = seen.filter((q) => !team.has(q.id)).find((q) => dist(me, q) <= (k.strike || 3.4) + 2);
-      if (v) return { text: 'Snuff your lantern (Q) to strike', hint: true };
+    if (sneak && !g.settling && !struck) {
+      const rad = (id) => SIZE_R[(CRITTERS[(P(id) || {}).critter] || CRITTERS.fox).size] || 1.95;
+      const near = seen.filter((q) => !team.has(q.id)).map((q) => ({ q, d: dist(me, q), touch: rad(api.me()) + rad(q.id) - 0.35 }))
+        .sort((a, b) => a.d - b.d)[0];
+      if (near && near.d <= near.touch + 3) {
+        const name = P(near.q.id)?.name;
+        if (lit) return { text: `Snuff your lantern (Q) to strike ${name}`, hint: true };
+        if (inLight(g, near.q, lamps)) return { text: `${name} is in the lamplight: too bright to strike`, hint: true };
+        if (near.d <= near.touch + 0.25) return { kind: 'strike', target: near.q.id, key: 'F', text: `Press F to spirit away ${name}`, danger: true };
+        return { text: `Get closer: you have to touch ${name}`, hint: true };
+      }
     }
     const roleDone = tk('role') ? tk('role').done : !!g.myAction;
     const meddleDone = tk('meddle') ? tk('meddle').done : !!g.myMeddle;
@@ -501,6 +527,7 @@
   let hudKey = '';
   function updateHud(g, seen, lamps, prog) {
     const pr = frame.wisp ? null : prompt(g, seen, lamps);
+    lastPrompt = pr;
     const lit = frame.me ? litLocal : false;
     const key = [pr && pr.text, pr && pr.danger, lit, frame.wisp, Math.round(prog * 20)].join('|');
     if (key === hudKey) return; hudKey = key;
@@ -512,10 +539,12 @@
       box.innerHTML = `${esc(pr.text)}<span class="bar"><i style="width:${Math.round(prog * 100)}%;background:#9BE37B"></i></span>`;
       box.className = 'nb-prompt show errand'; act.classList.add('hidden');
     } else if (pr) {
-      box.innerHTML = `<span class="kbd">E</span> ${pr.hint ? '' : 'Hold to '}${esc(pr.text)}${prog ? `<span class="bar"><i style="width:${Math.round(prog * 100)}%"></i></span>` : ''}`;
+      const strikeNow = pr.kind === 'strike';
+      box.innerHTML = pr.hint ? `🌑 ${esc(pr.text)}` : strikeNow ? `<span class="kbd">F</span> ${esc(pr.text.replace(/^Press F to /, ''))}`
+        : `<span class="kbd">E</span> Hold to ${esc(pr.text)}${prog ? `<span class="bar"><i style="width:${Math.round(prog * 100)}%"></i></span>` : ''}`;
       box.className = `nb-prompt show ${pr.danger ? 'danger' : ''} ${pr.hint ? 'hint' : ''}`;
       act.classList.toggle('hidden', !!pr.hint); act.classList.toggle('danger', !!pr.danger);
-      act.textContent = pr.danger ? '🌑 Hold' : '✋ Hold';
+      act.textContent = strikeNow ? '🌑 Strike!' : pr.danger ? '🌑 Hold' : '✋ Hold';
     } else { box.className = 'nb-prompt'; act.classList.add('hidden'); }
   }
 

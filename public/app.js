@@ -452,7 +452,7 @@
     const picked = g.mySneakVote || (g.myAction && g.myAction.target);
     const map = {
       night: ['🌙', g.settling ? 'Quiet night' : `Night ${g.day}`,
-        !meAlive ? 'You\'re a Wisp: watch the whole village' : onTeam && !g.settling ? (g.attempted ? 'Slip away and relight your lantern' : 'Go dark (Q) and strike (hold E)')
+        !meAlive ? 'You\'re a Wisp: watch the whole village' : onTeam && !g.settling ? (g.attempted ? 'Slip away and relight your lantern' : 'Go dark (Q), touch someone, press F')
           : 'Walk the village with your lantern 🏮'],
       dawn: ['🌅', 'Morning', 'Read the morning report'],
       day: ['☀️', `Day ${g.day}`, !meAlive ? 'Wisps watch from the mist' : g.bigGame ? 'Nominate a suspect, then press Ready' : 'Talk it out, then press Ready'],
@@ -619,7 +619,7 @@
       else {
         const steps = [];
         if (onTeam && !g.settling) {
-          steps.push(g.attempted ? '✓ The deed is done. Get away and light your lantern.' : 'Find a critter alone in the dark.', 'Snuff your lantern (<b>Q</b>) so nobody can see you.', 'Get close and <b>hold E</b>. Not inside lamplight!');
+          steps.push(g.attempted ? '✓ The deed is done. Get away and light your lantern.' : 'Find a critter alone in the dark.', 'Snuff your lantern (<b>Q</b>) so nobody can see you.', 'Get close enough to <b>touch</b> them and press <b>F</b>. Not inside lamplight!');
           if (team.length > 1) steps.push(`Plan in the 🌑 Den. Name a target and AI teammates go after them.`);
           done = !!g.attempted;
         } else if (onTeam) steps.push('Quiet night: nobody vanishes. Walk around and look normal.', 'Scout who goes where. Plan in the 🌑 Den.');

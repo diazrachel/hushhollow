@@ -21,7 +21,7 @@ function initBot(room, p) {
     plan, striker, goal: null, wait: Math.random() * 1.5, stuck: 0, attempts: 0, fleeUntil: 0,
     stalkAt: dur * (humanSneak ? 0.6 : 0.2 + Math.random() * 0.25),
     // some villagers go dark for a while too (to spy, hide, or just be weird), so "lantern off" is a hint, not proof
-    spyAt: !sneak && Math.random() < ({ 4: 0.15, 5: 0.4, 6: 0.4, 7: 0.5 }[g.n] ?? (g.n <= 10 ? 0.08 : 0)) ? dur * (0.15 + Math.random() * 0.6) : Infinity, spyFor: 6 + Math.random() * 10,
+    spyAt: !sneak && Math.random() < ({ 4: 0.15, 5: 0.4, 6: 0.15, 7: 0.25 }[g.n] ?? 0) ? dur * (0.15 + Math.random() * 0.6) : Infinity, spyFor: 6 + Math.random() * 10,
   };
 }
 
@@ -85,12 +85,9 @@ function think(room, p, b, dt) {
     if (t && n.pos[t]) {
       if (me.lit) Night.input(room, id, { t: 'lantern', on: false });
       const tp = n.pos[t];
-      if (dist(me, tp) <= Night.STRIKE_RANGE * 0.85) {
-        if (careless || safeToStrike(room, id, t)) {
-          me.dx = 0; me.dy = 0;
-          Night.input(room, id, { t: 'hold', on: true });
-          return;
-        }
+      if (dist(me, tp) <= Night.touchDist(room, id, t)) {
+        // touching: one quick strike (same rule as players pressing F)
+        if ((careless || safeToStrike(room, id, t)) && Night.strike(room, id, t)) { me.dx = 0; me.dy = 0; return; }
         // someone's looking: back off and try again later
         b.attempts++; b.stalkAt = n.t + 4 + Math.random() * 4;
         if (b.attempts >= 3) n.teamTarget = null;
@@ -111,6 +108,11 @@ function think(room, p, b, dt) {
   if (b.spyAt !== Infinity) {
     if (n.t >= b.spyAt && n.t < b.spyAt + b.spyFor && me.lit) Night.input(room, id, { t: 'lantern', on: false });
     else if (n.t >= b.spyAt + b.spyFor && !me.lit) { Night.input(room, id, { t: 'lantern', on: true }); b.spyAt = Infinity; }
+  }
+  // ---- heard a squeak? go and look (unless already busy with something important) ----
+  if (n.heard && n.heard[id] && !b.investigated && !n.found.has(id)) {
+    b.investigated = true;
+    if (Math.random() < (careless ? 0.4 : 0.8)) { b.goal = { x: n.heard[id].x, y: n.heard[id].y }; b.task = null; b.wait = 0; }
   }
   // ---- found a tombstone? run and ring the bell (Sneaks sometimes do it too, to look innocent) ----
   const role = g.roles[id];

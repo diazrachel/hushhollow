@@ -23,11 +23,11 @@ const isSneakTeam = (role) => ROLES[role] && ROLES[role].team === 'sneaks';
 // - Sneaks: up to 3, each a different type (Sneak, Trickster, Shadow Mole), picked at random.
 // - Every other role appears at most once.
 const SNEAK_TYPES = ['sneak', 'trickster', 'mole'];
-function sneakCount(n) { if (n <= 7) return 1; if (n <= 11) return 2; return 3; }
+function sneakCount(n) { if (n <= 7) return 1; if (n <= 13) return 2; return 3; }
 const owlCount = (n) => (n >= 9 ? 2 : 1);
 // Village roles besides the Owl(s), by player count (tuned with simulations)
 function extraPowerRange(n) {
-  const table = { 4: [0, 0], 5: [1, 1], 6: [0, 0], 7: [0, 0], 8: [2, 3], 9: [2, 3], 10: [1, 2], 11: [0, 0], 12: [4, 4], 13: [4, 4], 14: [4, 4] };
+  const table = { 4: [0, 0], 5: [1, 1], 6: [0, 0], 7: [0, 0], 8: [2, 3], 9: [2, 3], 10: [2, 3], 11: [2, 3], 12: [3, 4], 13: [0, 1], 14: [4, 4] };
   return table[n] || [3, 4];
 }
 function soloRange(n, spice) {

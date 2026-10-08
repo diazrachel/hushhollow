@@ -164,7 +164,7 @@ class Room {
     }
     if (!g || g.phase === 'over') return;
     switch (m.t) {
-      case 'move': case 'pos': case 'lantern': case 'hold': return Night.input(this, p.id, m);
+      case 'move': case 'pos': case 'lantern': case 'hold': case 'strike': return Night.input(this, p.id, m);
       case 'post': return this.post(p, m);
       case 'react': return this.react(p, m);
       case 'yarn': return this.setYarn(p, m);
