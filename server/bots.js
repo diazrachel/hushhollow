@@ -21,7 +21,7 @@ function initBot(room, p) {
     plan, striker, goal: null, wait: Math.random() * 1.5, stuck: 0, attempts: 0, fleeUntil: 0,
     stalkAt: dur * (humanSneak ? 0.6 : 0.2 + Math.random() * 0.25),
     // some villagers go dark for a while too (to spy, hide, or just be weird), so "lantern off" is a hint, not proof
-    spyAt: !sneak && Math.random() < ({ 4: 0.15, 5: 0.4, 6: 0.15, 7: 0.25 }[g.n] ?? 0) ? dur * (0.15 + Math.random() * 0.6) : Infinity, spyFor: 6 + Math.random() * 10,
+    spyAt: !sneak && Math.random() < ({ 4: 0.15, 5: 0.15, 6: 0.15, 7: 0.25 }[g.n] ?? 0) ? dur * (0.15 + Math.random() * 0.6) : Infinity, spyFor: 6 + Math.random() * 10,
   };
 }
 
@@ -123,8 +123,8 @@ function think(room, p, b, dt) {
       b.ringAfter = n.t + (sneak ? 3 + Math.random() * 5 : 0.4 + Math.random() * 1.2);
     }
     if (b.ring && n.t >= b.ringAfter) {
-      const bell = g.world.bell;
-      if (dist(me, bell) <= Night.BELL_RANGE - 1) {
+      const bell = Night.bellSpot(g.world);
+      if (dist(me, bell) <= Night.BELL_RANGE - 1.5) {
         const ht = Night.holdTarget(room, id);
         if (ht && ht.kind === 'bell') { me.dx = 0; me.dy = 0; Night.input(room, id, { t: 'hold', on: true }); return; }
       }

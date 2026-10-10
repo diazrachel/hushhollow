@@ -494,9 +494,10 @@
       const r = $('#night-wrap').getBoundingClientRect();
       if (r.top < 0 || r.bottom > innerHeight) $('#night-wrap').scrollIntoView({ block: 'center', behavior: 'smooth' });
     }, 60);
-    if (isNight && window.HHNight) window.HHNight.start({ send, game: () => S && S.game, P, me: () => S.me, role: (r) => ROLES[r], sound, onTasks: () => renderAction() });
-    if (isNight && window.HHNight && g.nightTasks) window.HHNight.setTasks(g.nightTasks);
-    else if (window.HHNight) window.HHNight.stop();
+    if (isNight && window.HHNight) {
+      window.HHNight.start({ send, game: () => S && S.game, P, me: () => S.me, role: (r) => ROLES[r], sound, onTasks: () => renderAction() });
+      if (g.nightTasks) window.HHNight.setTasks(g.nightTasks);
+    } else if (window.HHNight) window.HHNight.stop();
     renderMap(); renderAction(); renderSecrets(); renderTabs(); renderTracks();
   }
   // Footprints from last night, drawn over the day map, with a replay slider
@@ -615,7 +616,7 @@
     let label = '', text = '', who = null, done = false, actions = '';
     if (g.phase === 'night') {
       label = 'Tonight';
-      if (!meAlive) text = "You're a Wisp. Tonight you can see the whole village, every critter, every lantern. Watch closely!";
+      if (!meAlive) text = "You're a Wisp 👻 Float around the village as a ghost (WASD or drag) and watch everything. Only other Wisps can see you, and you can float right through houses.";
       else {
         const steps = [];
         if (onTeam && !g.settling) {
@@ -892,7 +893,8 @@
     const outs = (e.outs || []).length ? `<li>🌑 Lanterns went dark near ${e.outs.map((o) => `${esc(o.zone)} (${o.when})`).join(', ')}</li>` : '';
     const lampOuts = (e.lampOuts || []).length ? `<li>💨 A street lamp was blown out near ${e.lampOuts.map((o) => esc(o.zone)).join(', ')}</li>` : '';
     const b = e.bell;
-    const bellLi = b ? `<li>🔔 <b>${nm(b.by)}</b> rang the bell after finding ${nm(b.victim)}'s tombstone. ${b.near.length ? `When it rang, closest to the tombstone: ${b.near.map((x) => `<b>${nm(x.id)}</b> (${esc(x.how)})`).join(', ')}.` : 'Nobody was near the tombstone when it rang.'} <span class="muted">${b.left} ring${b.left === 1 ? '' : 's'} left this game.</span></li>` : '';
+    const bellLi = b && !b.victim ? `<li>🔔 <b>${nm(b.by)}</b> rang the bell before anyone went missing, so the night ended early. <span class="muted">${b.left} ring${b.left === 1 ? '' : 's'} left this game.</span></li>`
+      : b ? `<li>🔔 <b>${nm(b.by)}</b> rang the bell after ${nm(b.victim)} went missing. ${b.near.length ? `When it rang, closest to the tombstone: ${b.near.map((x) => `<b>${nm(x.id)}</b> (${esc(x.how)})`).join(', ')}.` : 'Nobody was near the tombstone when it rang.'} <span class="muted">${b.left} ring${b.left === 1 ? '' : 's'} left this game.</span></li>` : '';
     const clues = e.zone || outs || lampOuts || bellLi ? `<div class="scene-box"><b>🔍 What the village noticed</b><ul>${bellLi}
       ${e.zone ? `<li>🪦 A tombstone stands near <b>${esc(e.zone)}</b>${(g.scenes || []).some((x) => x.night === e.night && x.mole) ? ' and there were no footprints, just fresh dirt 🕳️' : ''}</li>` : ''}${outs}${lampOuts}</ul>
       <p class="small muted" style="margin:.3rem 0 0">👣 Last night's footprints are on the village map. Drag the slider to replay who walked where, and when.</p></div>` : '';
@@ -943,7 +945,7 @@
       const sceneLine = h.scene ? `<li>🔍 ${h.scene.map(esc).join(' ')}</li>` : '';
       const extra = walkLine + sceneLine + (h.meddles || []).map((m) => `<li>🎭 ${nm(m.by)} meddled with ${nm(m.target)}</li>`).join('')
         + (h.lit || []).map((x) => `<li>🏮 A lantern glowed at ${nm(x)}'s house</li>`).join('')
-        + (h.bell ? `<li>🔔 ${nm(h.bell.by)} rang the bell${h.bell.near.length ? `; closest: ${h.bell.near.map((x) => nm(x.id)).join(', ')}` : ''}</li>` : '');
+        + (h.bell ? `<li>🔔 ${nm(h.bell.by)} rang the bell${h.bell.victim ? '' : ' early'}${h.bell.near.length ? `; closest: ${h.bell.near.map((x) => nm(x.id)).join(', ')}` : ''}</li>` : '');
       return `<div class="recap-night"><b>Night ${h.night}</b>${h.kill ? ` · Sneaks targeted ${nm(h.kill)}${h.saved ? ' (saved! 🦔)' : ''}` : ''}<ul>${items || '<li>Nobody went out.</li>'}${extra}</ul></div>`;
     }).join('');
     const m = modal(`<div class="gameover"><p class="winner ${o.winner}">${o.winner === 'village' ? '🏡 Village wins!' : '🌑 Sneaks win!'}</p>

@@ -19,12 +19,14 @@ const LAMP_LIGHT = 8;         // street lamp radius
 const PORCH_LIGHT = 11;       // Lantern Keeper's porch light radius
 const STRIKE_RANGE = 3.4;     // (used by the hint "get closer"; the real check is touching, below)
 const BODY_R = { small: 1.55, medium: 1.95, large: 2.4 }; // drawn critter sizes, same as the browser
-const TOUCH_OVERLAP = 0.35;   // bodies must overlap a little (about 10% of a critter)
+const STRIKE_GAP = 1.4;       // you can strike from this far past touching (about half a critter away)
 const STRIKE_LAG = 0.7;       // seconds of position history the server checks (what you saw was a moment old)
 const STRIKE_SLACK = 0.9;
 const HEAR_RANGE = 16;        // a strike makes a muffled squeak that critters this close can hear     // extra distance allowed for network wobble
 const HOLD_TIME = { strike: 1.4, house: 1.5, lamp: 1.4, blow: 0.8, bell: 1.0 };
-const BELL_RANGE = 3.6;
+const BELL_RANGE = 5.5;       // stand anywhere on/around the bell tower
+const BELL_COOLDOWN = 15;     // seconds into the night before the bell can be rung
+const bellSpot = (w) => ({ x: w.bell.x, y: w.bell.y - 2.2 }); // middle of the drawn tower
 const BELL_NEAR = 25;          // the morning report names who was this close to the tombstone when the bell rang
 const HOUSE_RANGE = 6;        // how close to a door you must be to use an ability there
 const LAMP_RANGE = 3.4;
@@ -115,6 +117,9 @@ function begin(room) {
     tomb: null, found: new Set(), foundAt: {}, bell: null, endNow: false, heard: {},
   };
   if (g.bellsLeft === undefined) g.bellsLeft = g.n >= 8 ? 3 : 2;
+  // Wisps (eliminated critters) float around as ghosts. Only other Wisps can see them.
+  g.night.ghosts = {};
+  for (const h of world.homes) if (!g.alive.has(h.id)) g.night.ghosts[h.id] = { x: h.door.x, y: h.door.y, budget: SPEED };
   if (!g.world.bell) g.world.bell = { x: 50, y: POND.y - POND.ry - 4.2 };
   for (const id of Object.keys(pos)) {
     g.night.seen[id] = {}; g.night.zoneTime[id] = {}; g.night.ev[id] = [];
@@ -216,7 +221,7 @@ function holdTarget(room, id) {
     }
     if (best) return { kind: 'house', target: best };
   }
-  if (n.tomb && n.found.has(id) && !n.bell && g.bellsLeft > 0 && dist(p, g.world.bell) <= BELL_RANGE) return { kind: 'bell', target: 0 };
+  if (!n.bell && g.bellsLeft > 0 && n.t >= BELL_COOLDOWN && dist(p, bellSpot(g.world)) <= BELL_RANGE) return { kind: 'bell', target: 0 };
   for (let i = 0; i < n.lamps.length; i++) {
     const l = n.lamps[i];
     if (dist(p, l) > LAMP_RANGE) continue;
@@ -229,7 +234,7 @@ function holdTarget(room, id) {
 // Two critters are "touching" when their drawn bodies overlap a little
 function touchDist(room, a, b) {
   const sa = SIZE[(room.get(a) || {}).critter] || 'medium', sb = SIZE[(room.get(b) || {}).critter] || 'medium';
-  return BODY_R[sa] + BODY_R[sb] - TOUCH_OVERLAP;
+  return BODY_R[sa] + BODY_R[sb] + STRIKE_GAP;
 }
 // Can `id` spirit away `target` right now? (one press of F, no holding)
 function canStrike(room, id, target, slack = STRIKE_SLACK) {
@@ -247,9 +252,24 @@ function strike(room, id, target) {
   return true;
 }
 
+const GHOST_SPEED = SPEED * 1.25;
+function moveGhost(gh, m) {
+  const x = Number(m.x), y = Number(m.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  const now = Date.now(), el = Math.min(0.6, (now - (gh.at || now)) / 1000);
+  gh.at = now;
+  gh.budget = Math.min(GHOST_SPEED * 0.6, (gh.budget || 0) + GHOST_SPEED * MOVE_SLACK * el);
+  const d = Math.hypot(x - gh.x, y - gh.y), k = d > gh.budget ? gh.budget / d : 1;
+  gh.x = clamp(gh.x + (x - gh.x) * k, 1, 99); gh.y = clamp(gh.y + (y - gh.y) * k, 1, 99); // ghosts float through walls
+  gh.budget = Math.max(0, gh.budget - Math.min(d, gh.budget));
+}
+
 function input(room, id, m) {
   const g = room.game, n = g && g.night;
-  if (!n || g.phase !== 'night' || !n.pos[id] || n.gone.has(id)) return;
+  if (!n || g.phase !== 'night') return;
+  const gh = n.ghosts && n.ghosts[id];
+  if (gh && (n.gone.has(id) || !g.alive.has(id))) { if (m.t === 'pos') moveGhost(gh, m); return; }
+  if (!n.pos[id] || n.gone.has(id)) return;
   const p = n.pos[id];
   if (m.t === 'pos') {
     // The browser moves your critter itself (no waiting on the network). The server checks it:
@@ -328,6 +348,7 @@ function completeHold(room, id, h) {
     }
     n.strike = { by: id, victim: v, x: vp.x, y: vp.y, t: n.t, zone, saved: false };
     n.gone.add(v); vp.hold = null; vp.dx = 0; vp.dy = 0;
+    n.ghosts[v] = { x: vp.x, y: vp.y, budget: SPEED };
     n.tomb = { x: +vp.x.toFixed(1), y: +vp.y.toFixed(1), victim: v, t: n.t };
     // a muffled squeak: anyone close enough hears it (and sees roughly where), but not who
     n.heard = {};
@@ -434,9 +455,10 @@ function ringBell(room, id) {
   const g = room.game, n = g.night;
   if (n.bell || g.bellsLeft <= 0) return;
   g.bellsLeft--;
-  const near = Object.keys(n.pos).filter((q) => q !== n.tomb.victim && !n.gone.has(q) && g.alive.has(q))
+  // if someone was taken tonight: who was closest to the tombstone right now?
+  const near = !n.tomb ? [] : Object.keys(n.pos).filter((q) => q !== n.tomb.victim && !n.gone.has(q) && g.alive.has(q))
     .map((q) => ({ id: q, d: +dist(n.pos[q], n.tomb).toFixed(1) })).filter((x) => x.d <= BELL_NEAR).sort((a, b) => a.d - b.d).slice(0, 3);
-  n.bell = { by: id, t: n.t, near, victim: n.tomb.victim };
+  n.bell = { by: id, t: n.t, near, victim: n.tomb ? n.tomb.victim : null };
   for (const q of Object.keys(n.ev)) {
     n.ev[q].push({ e: '🔔', big: true, text: q === id ? 'You rang the bell! Everyone, to the Pond…' : `${room.name(id)} rang the bell! Everyone, to the Pond…` });
     const t = taskOf(n, q, 'bell'); if (t) finishTask(room, q, t, q === id ? 'You rang the bell' : `${room.name(id)} rang the bell`);
@@ -460,6 +482,8 @@ function frameFor(room, viewerId) {
   const out = {
     t: 'nf', nt: +n.t.toFixed(2),
     me: me && !wisp ? [+me.x.toFixed(2), +me.y.toFixed(2), me.lit ? 1 : 0, me.hold ? me.hold.kind : 0, me.hold ? +(me.hold.t / HOLD_TIME[me.hold.kind]).toFixed(2) : 0, me.keen ? 1 : 0, +(me.errT / ERRAND_TIME).toFixed(2)] : null,
+    ghost: wisp && n.ghosts && n.ghosts[viewerId] ? [+n.ghosts[viewerId].x.toFixed(2), +n.ghosts[viewerId].y.toFixed(2)] : undefined,
+    ghosts: wisp && n.ghosts ? Object.entries(n.ghosts).filter(([gid]) => gid !== viewerId).map(([gid, q]) => [gid, +q.x.toFixed(1), +q.y.toFixed(1)]) : undefined,
     see, glows,
     lamps: n.lamps.map((l) => (l.lit ? 1 : 0)).join(''),
     porches: [...n.porches],
@@ -511,6 +535,6 @@ function summarize(room, meddled = new Set()) {
 
 module.exports = {
   TICK, FRAME_EVERY, LIGHT, LIGHT_KEEN, ERRAND_RANGE, ERRAND_TIME, DARK_SIGHT, LAMP_LIGHT, PORCH_LIGHT, STRIKE_RANGE, HOLD_TIME, HOUSE_RANGE, LAMP_RANGE, SPEED,
-  HEAR_RANGE, BELL_RANGE, BELL_NEAR, ringBell, strike, canStrike, touchDist,
+  HEAR_RANGE, BELL_RANGE, BELL_COOLDOWN, bellSpot, BELL_NEAR, ringBell, strike, canStrike, touchDist,
   begin, tick, input, frameFor, summarize, holdTarget, recognizes, inStaticLight, zoneOf, blocked, dist, buildWorld, LANDMARKS,
 };

@@ -424,7 +424,9 @@ class Room {
     if (died.length) this.log(`Dawn. ${died.map((d) => this.name(d)).join(', ')} was spirited away near ${scene.zone}${scene.mole ? '. There were no footprints, only fresh dirt 🕳️' : ''}. Their notepad was left behind.`);
     else if (rec.saved) this.log('Dawn. Everyone is safe. Someone was protected in the night!');
     else this.log('Dawn. Everyone woke up safe.');
-    if (bell) this.log(`🔔 ${this.name(bell.by)} rang the bell after finding ${this.name(bell.victim)}'s tombstone. ${bell.near.length ? `When it rang, closest to the tombstone: ${bell.near.map((x) => `${this.name(x.id)} (${x.how})`).join(', ')}.` : 'When it rang, nobody was near the tombstone.'} ${bell.left} bell ring${bell.left === 1 ? '' : 's'} left this game.`);
+    if (bell) this.log(bell.victim
+      ? `🔔 ${this.name(bell.by)} rang the bell after ${this.name(bell.victim)} went missing. ${bell.near.length ? `When it rang, closest to the tombstone: ${bell.near.map((x) => `${this.name(x.id)} (${x.how})`).join(', ')}.` : 'When it rang, nobody was near the tombstone.'} ${bell.left} bell ring${bell.left === 1 ? '' : 's'} left this game.`
+      : `🔔 ${this.name(bell.by)} rang the bell before anyone went missing, and the night ended early. ${bell.left} bell ring${bell.left === 1 ? '' : 's'} left this game.`);
     if (g.outs.length) this.log(`🏮 Lanterns went dark tonight near ${g.outs.map((o) => `${o.zone} (${o.when})`).join(', ')}.`);
     if (g.lampOuts.length) this.log(`💨 A street lamp was blown out near ${g.lampOuts.map((o) => o.zone).join(', ')}.`);
     g.settleLeft = Math.max(0, (g.settleLeft || 0) - 1);

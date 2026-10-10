@@ -22,7 +22,7 @@
   let lastSent = { x: -1, y: -1 }, lastSendAt = 0;
   const keys = new Set();
   let touchDir = null, holding = false, localHold = null, lastHoldSend = 0;
-  let tasks = [], tasksOpen = null, mark = null, lastBells;
+  let tasks = [], tasksOpen = null, mark = null, lastBells, wasGhost = false;
   let worldCv = null, worldKey = '', miniKey = '', miniStatic = null;
 
   // ---------- helpers ----------
@@ -100,6 +100,7 @@
     localHold = null; hudKey = '';
   }
   function setHold(on) {
+    if (frame && frame.wisp) return;
     if (holding === on) return;
     holding = on;
     flushPos(true); // make sure the server knows exactly where you are before it checks the target
@@ -130,7 +131,7 @@
     const l = Math.hypot(x, y); return l ? { x: x / l, y: y / l } : { x: 0, y: 0 };
   }
   function flushPos(force) {
-    if (!me || !frame || !frame.me) return;
+    if (!me || !frame || !(frame.me || frame.ghost)) return;
     const now = performance.now();
     if (!force && now - lastSendAt < SEND_EVERY) return;
     if (Math.abs(me.x - lastSent.x) < 0.01 && Math.abs(me.y - lastSent.y) < 0.01) return;
@@ -154,7 +155,11 @@
       // the server dropped your hold (moved, target left, already done)? stop the fake progress ring
       if (f.me[3]) localHold && (localHold.seen = true);
       else if (localHold && (localHold.seen || performance.now() - localHold.start > 1200)) localHold = null;
+    } else if (f.ghost) {
+      // you're a Wisp: float around as a ghost
+      if (!me || f.fix || !wasGhost || Math.hypot(me.x - f.ghost[0], me.y - f.ghost[1]) > 12) me = { x: f.ghost[0], y: f.ghost[1] };
     } else me = null;
+    if (!!f.wisp !== wasGhost) { wasGhost = !!f.wisp; holding = false; localHold = null; renderTasks(); hudKey = ''; }
     if (f.bells !== lastBells) { lastBells = f.bells; if (!f.tasks) renderTasks(); }
     if (f.tasks) { tasks = f.tasks; renderTasks(); api.onTasks && api.onTasks(tasks); }
     if (f.ev) for (const e of f.ev) {
@@ -196,15 +201,16 @@
     if (!running) return;
     const dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
     const g = G();
-    if (me && g && g.world && frame && frame.me) {
-      const d = dir(), speed = (g.nightConst && g.nightConst.speed) || 13;
+    if (me && g && g.world && frame && (frame.me || frame.ghost)) {
+      const d = dir(), speed = ((g.nightConst && g.nightConst.speed) || 13) * (frame.ghost ? 1.25 : 1);
       if (d.x || d.y) {
-        me.x += d.x * speed * dt; me.y += d.y * speed * dt; collide(g.world, me);
+        me.x += d.x * speed * dt; me.y += d.y * speed * dt;
+        if (frame.ghost) { me.x = clamp(me.x, 1, 99); me.y = clamp(me.y, 1, 99); } else collide(g.world, me); // ghosts float through walls
         if (localHold) localHold = null; // walking cancels a hold, same as on the server
       }
       flushPos(false);
       // still holding E, but the server isn't doing anything (you walked up to a door while holding)? ask again
-      if (holding && !frame.me[3] && !localHold && now - lastHoldSend > 700) { flushPos(true); api.send({ t: 'hold', on: true }); lastHoldSend = now; startLocalHold(); }
+      if (holding && frame.me && !frame.me[3] && !localHold && now - lastHoldSend > 700) { flushPos(true); api.send({ t: 'hold', on: true }); lastHoldSend = now; startLocalHold(); }
     }
     try { draw(now); } catch (e) { console.error(e); }
     raf = requestAnimationFrame(loop);
@@ -292,7 +298,8 @@
     c.fillText(cr.e, x, y + r * 0.08);
     if (HATS[p.hat]) { c.font = `${r * 0.8}px system-ui, "Apple Color Emoji"`; c.fillText(HATS[p.hat], x + r * 0.7, y - r * 0.85); }
     if (opts.lantern) { c.fillStyle = '#FFD66B'; c.strokeStyle = '#2B2233'; c.lineWidth = 0.25 * s; c.beginPath(); c.arc(x + r * 1.05, y + r * 0.35, 0.55 * s, 0, 7); c.fill(); c.stroke(); }
-    label(c, p.name + (opts.me ? ' (you)' : ''), x, y - r - 1.7 * s, s, '#2B2233', opts.me ? '#FFB3C4' : '#FFF8EC');
+    if (opts.ghost) { c.font = `${r * 0.9}px system-ui, "Apple Color Emoji"`; c.fillText('👻', x - r * 0.9, y - r * 0.8); }
+    label(c, p.name + (opts.me ? ' (you)' : ''), x, y - r - 1.7 * s, s, '#2B2233', opts.ghost ? '#E4DDF7' : opts.me ? '#FFB3C4' : '#FFF8EC');
     if (opts.progress) {
       c.strokeStyle = 'rgba(43,34,51,.55)'; c.lineWidth = 0.75 * s; c.beginPath(); c.arc(x, y, r + 0.9 * s, 0, 7); c.stroke();
       c.strokeStyle = opts.progressColor || '#FFD66B'; c.lineWidth = 0.6 * s;
@@ -326,13 +333,14 @@
     const g = G(); if (!g || !g.world || !frame) { ctx.fillStyle = '#0B0918'; ctx.fillRect(0, 0, canvas.width, canvas.height); return; }
     const k = g.nightConst || {};
     const wisp = frame.wisp || !frame.me || !me;
+    const ghost = frame.wisp && frame.ghost && me; // a Wisp floating around
     const narrow = canvas.clientWidth < 520;
-    const viewW = wisp ? 104 : narrow ? 34 : 46;
+    const viewW = ghost ? (narrow ? 46 : 62) : wisp ? 104 : narrow ? 34 : 46;
     cam.scale = canvas.width / viewW;
     const viewH = canvas.height / cam.scale;
-    const focus = wisp ? { x: 50, y: 50 } : me;
-    cam.x = wisp ? 50 : clamp(focus.x, viewW / 2 - 2, 102 - viewW / 2);
-    cam.y = wisp ? 50 : clamp(focus.y, viewH / 2 - 2, 102 - viewH / 2);
+    const follow = !wisp || ghost;
+    cam.x = !follow ? 50 : clamp(me.x, viewW / 2 - 2, 102 - viewW / 2);
+    cam.y = !follow ? 50 : clamp(me.y, viewH / 2 - 2, 102 - viewH / 2);
     const s = cam.scale, sc = (x, y) => toScreen(x, y);
     ctx.fillStyle = '#0B0918'; ctx.fillRect(0, 0, canvas.width, canvas.height);
     // the cached village picture, cropped to what the camera sees
@@ -380,6 +388,13 @@
     const seen = others();
     lastSeen = seen; lastLamps = lamps;
     for (const q of seen) { const [x, y] = sc(q.x, q.y); critter(ctx, P(q.id), x, y, s, { lantern: q.lit }); }
+    // other ghosts (only Wisps ever get these) and your own ghost
+    if (wisp) {
+      ctx.globalAlpha = 0.45;
+      for (const [gid, gx, gy] of frame.ghosts || []) { const [x, y] = sc(gx, gy + Math.sin(now / 400 + gx) * 0.4); critter(ctx, P(gid), x, y, s, { ghost: true }); }
+      if (ghost) { const [x, y] = sc(me.x, me.y + Math.sin(now / 400) * 0.4); ctx.globalAlpha = 0.6; critter(ctx, P(api.me()), x, y, s, { me: true, ghost: true }); }
+      ctx.globalAlpha = 1;
+    }
     const lit = frame.me ? litLocal : false, keen = frame.me && frame.me[5];
     let prog = 0, progColor = null;
     if (!wisp) {
@@ -408,6 +423,7 @@
     };
     const myLight = lit ? (keen ? k.keen || 11 : k.light || 9) : k.dark || 3.2;
     if (!wisp) hole(me.x, me.y, myLight, lit ? 1 : 0.75);
+    else if (ghost) hole(me.x, me.y, 12, 0.5);
     for (const l of lamps) if (l.lit) hole(l.x, l.y - 2, k.lamp || 8);
     for (const hid of frame.porches || []) { const h = g.world.homes.find((x) => x.id === hid); if (h) hole(h.door.x, h.door.y, k.porch || 11); }
     for (const q of seen) if (q.lit) hole(q.x, q.y, (k.light || 9) * 0.85, 0.9);
@@ -483,6 +499,7 @@
       c.beginPath(); c.arc(t.x * s, t.y * s, 2.2 * s, 0, 7); c.fill(); c.stroke();
     }
     if (frame.tomb) { c.font = `${8 * s}px system-ui, "Apple Color Emoji"`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('🪦', frame.tomb[0] * s, frame.tomb[1] * s); }
+    if (me && frame.ghost) { c.fillStyle = 'rgba(228,221,247,.85)'; c.beginPath(); c.arc(me.x * s, me.y * s, 2.6 * s, 0, 7); c.fill(); }
     if (me && frame.me) { c.fillStyle = '#fff'; c.strokeStyle = '#FF6B8B'; c.lineWidth = 1.4 * s; c.beginPath(); c.arc(me.x * s, me.y * s, 2.6 * s, 0, 7); c.fill(); c.stroke(); }
   }
 
@@ -496,14 +513,14 @@
     const struck = frame.struck || (tk('strike') && tk('strike').done);
     if (sneak && !g.settling && !struck) {
       const rad = (id) => SIZE_R[(CRITTERS[(P(id) || {}).critter] || CRITTERS.fox).size] || 1.95;
-      const near = seen.filter((q) => !team.has(q.id)).map((q) => ({ q, d: dist(me, q), touch: rad(api.me()) + rad(q.id) - 0.35 }))
+      const near = seen.filter((q) => !team.has(q.id)).map((q) => ({ q, d: dist(me, q), touch: rad(api.me()) + rad(q.id) + 1.4 }))
         .sort((a, b) => a.d - b.d)[0];
       if (near && near.d <= near.touch + 3) {
         const name = P(near.q.id)?.name;
         if (lit) return { text: `Snuff your lantern (Q) to strike ${name}`, hint: true };
         if (inLight(g, near.q, lamps)) return { text: `${name} is in the lamplight: too bright to strike`, hint: true };
         if (near.d <= near.touch + 0.25) return { kind: 'strike', target: near.q.id, key: 'F', text: `Press F to spirit away ${name}`, danger: true };
-        return { text: `Get closer: you have to touch ${name}`, hint: true };
+        return { text: `Get a little closer to ${name}`, hint: true };
       }
     }
     const roleDone = tk('role') ? tk('role').done : !!g.myAction;
@@ -514,8 +531,12 @@
         .map((x) => ({ x, d: dist(me, x.door) })).filter((x) => x.d <= (k.house || 6)).sort((a, b) => a.d - b.d)[0];
       if (h) return { kind: 'house', text: `${g.myRole === 'trickster' ? 'Meddle with' : role.verb.split(' ')[0]} ${P(h.x.id)?.name}` };
     }
-    if (frame.tomb && !frame.rung && frame.bells > 0 && g.world.bell && dist(me, g.world.bell) <= 3.6)
-      return { kind: 'bell', text: `Ring the bell (${frame.bells} ring${frame.bells === 1 ? '' : 's'} left this game)` };
+    if (g.world.bell && dist(me, { x: g.world.bell.x, y: g.world.bell.y - 2.2 }) <= 5.5) {
+      if (frame.rung) return { text: '🔔 The bell already rang tonight', hint: true };
+      if (!(frame.bells > 0)) return { text: '🔔 No bell rings left this game', hint: true };
+      if (frame.nt < 15) return { text: `🔔 The bell can be rung in ${Math.ceil(15 - frame.nt)}s`, hint: true };
+      return { kind: 'bell', text: `ring the bell (${frame.bells} ring${frame.bells === 1 ? '' : 's'} left this game)` };
+    }
     const l = lamps.map((x) => ({ ...x, d: dist(me, x) })).filter((x) => x.d <= (k.lampR || 3.4)).sort((a, b) => a.d - b.d)[0];
     if (l && !l.lit) return { kind: 'lamp', text: 'Light the lamp' };
     if (l && l.lit && sneak) return { kind: 'blow', text: 'Blow out the lamp', danger: true };
@@ -534,13 +555,13 @@
     const box = $('#nb-prompt'), act = $('#nb-act'), lan = $('#nb-lantern');
     lan.textContent = lit ? '🏮 Lantern on' : '🌑 Lantern off';
     lan.classList.toggle('off', !lit); lan.classList.toggle('hidden', !!frame.wisp || !frame.me);
-    if (frame.wisp || !frame.me) { box.innerHTML = '👻 You are a Wisp. You can see everyone tonight, but you can\'t touch anything.'; box.className = 'nb-prompt show'; act.classList.add('hidden'); return; }
+    if (frame.wisp || !frame.me) { box.innerHTML = frame.ghost ? '👻 You\'re a ghost! Float anywhere. Only Wisps can see you.' : '👻 You are a Wisp. You can see everyone tonight, but you can\'t touch anything.'; box.className = 'nb-prompt show'; act.classList.add('hidden'); return; }
     if (pr && pr.errand) {
       box.innerHTML = `${esc(pr.text)}<span class="bar"><i style="width:${Math.round(prog * 100)}%;background:#9BE37B"></i></span>`;
       box.className = 'nb-prompt show errand'; act.classList.add('hidden');
     } else if (pr) {
       const strikeNow = pr.kind === 'strike';
-      box.innerHTML = pr.hint ? `🌑 ${esc(pr.text)}` : strikeNow ? `<span class="kbd">F</span> ${esc(pr.text.replace(/^Press F to /, ''))}`
+      box.innerHTML = pr.hint ? `${/^\p{Extended_Pictographic}/u.test(pr.text) ? '' : '🌑 '}${esc(pr.text)}` : strikeNow ? `<span class="kbd">F</span> ${esc(pr.text.replace(/^Press F to /, ''))}`
         : `<span class="kbd">E</span> Hold to ${esc(pr.text)}${prog ? `<span class="bar"><i style="width:${Math.round(prog * 100)}%"></i></span>` : ''}`;
       box.className = `nb-prompt show ${pr.danger ? 'danger' : ''} ${pr.hint ? 'hint' : ''}`;
       act.classList.toggle('hidden', !!pr.hint); act.classList.toggle('danger', !!pr.danger);
@@ -556,7 +577,7 @@
   }
   function renderTasks() {
     const el = $('#nb-tasks'); if (!el) return;
-    if (!tasks.length) { el.classList.add('hidden'); return; }
+    if (!tasks.length || (frame && frame.wisp)) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden');
     const real = tasks.filter((t) => t.k !== 'info'), done = real.filter((t) => t.done).length;
     const open = isTasksOpen();
