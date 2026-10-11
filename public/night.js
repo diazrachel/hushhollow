@@ -67,15 +67,17 @@
     canvas.addEventListener('pointermove', onPointer);
     ['pointerup', 'pointercancel', 'pointerleave'].forEach((e) => canvas.addEventListener(e, () => { touchDir = null; }));
     const act = $('#nb-act');
-    act.addEventListener('pointerdown', (e) => { e.preventDefault(); if (lastPrompt && lastPrompt.kind === 'strike') tryStrike(); else setHold(true); });
+    act.addEventListener('pointerdown', (e) => { e.preventDefault(); if (lastPrompt && lastPrompt.kind === 'strike') tryStrike(); else if (lastPrompt && lastPrompt.kind === 'wire') openWire(lastPrompt.i); else setHold(true); });
     ['pointerup', 'pointercancel', 'pointerleave'].forEach((e) => act.addEventListener(e, () => setHold(false)));
     $('#nb-lantern').addEventListener('click', toggleLantern);
     $('#nb-tasks').addEventListener('click', () => { tasksOpen = !isTasksOpen(); renderTasks(); });
+    mountWire();
   }
   function typing() { const a = document.activeElement; return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT'); }
   function onKey(e) {
     if (!running || typing()) return;
     const k = e.key.toLowerCase();
+    if (wireGame && k === 'escape' && e.type === 'keydown') { closeWire(true); return; }
     const move = ['arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'w', 'a', 's', 'd'];
     if (move.includes(k)) { e.preventDefault(); if (e.type === 'keydown') keys.add(k); else keys.delete(k); }
     if (k === 'e' || k === ' ') { e.preventDefault(); if (e.type === 'keydown' && !e.repeat) setHold(true); if (e.type === 'keyup') setHold(false); }
@@ -101,6 +103,8 @@
   }
   function setHold(on) {
     if (frame && frame.wisp) return;
+    if (on && !holding && !wireGame && lastPrompt && lastPrompt.kind === 'wire') { openWire(lastPrompt.i); return; }
+    if (wireGame) return;
     if (holding === on) return;
     holding = on;
     flushPos(true); // make sure the server knows exactly where you are before it checks the target
@@ -160,6 +164,7 @@
       if (!me || f.fix || !wasGhost || Math.hypot(me.x - f.ghost[0], me.y - f.ghost[1]) > 12) me = { x: f.ghost[0], y: f.ghost[1] };
     } else me = null;
     if (!!f.wisp !== wasGhost) { wasGhost = !!f.wisp; holding = false; localHold = null; renderTasks(); hudKey = ''; }
+    if (wireGame && !wireGame.done && (f.wisp || !f.me || f.lamps[wireGame.i] === '1')) closeWire(true); // taken, or someone else lit it
     if (f.bells !== lastBells) { lastBells = f.bells; if (!f.tasks) renderTasks(); }
     if (f.tasks) { tasks = f.tasks; renderTasks(); api.onTasks && api.onTasks(tasks); }
     if (f.ev) for (const e of f.ev) {
@@ -194,6 +199,7 @@
   function stop() {
     if (!running) return;
     running = false; cancelAnimationFrame(raf); keys.clear(); touchDir = null;
+    closeWire(false);
     if (holding) { holding = false; try { api.send({ t: 'hold', on: false }); } catch (e) { /* ignore */ } }
     $('#nb-banner') && ($('#nb-banner').className = 'nb-banner');
   }
@@ -203,7 +209,8 @@
     const g = G();
     if (me && g && g.world && frame && (frame.me || frame.ghost)) {
       const d = dir(), speed = ((g.nightConst && g.nightConst.speed) || 13) * (frame.ghost ? 1.25 : 1);
-      if (d.x || d.y) {
+      if (wireGame && (d.x || d.y) && !wireGame.done) closeWire(true);
+      if (wireGame && wireGame.done) { /* finishing up: stay put */ } else if (d.x || d.y) {
         me.x += d.x * speed * dt; me.y += d.y * speed * dt;
         if (frame.ghost) { me.x = clamp(me.x, 1, 99); me.y = clamp(me.y, 1, 99); } else collide(g.world, me); // ghosts float through walls
         if (localHold) localHold = null; // walking cancels a hold, same as on the server
@@ -538,7 +545,7 @@
       return { kind: 'bell', text: `ring the bell (${frame.bells} ring${frame.bells === 1 ? '' : 's'} left this game)` };
     }
     const l = lamps.map((x) => ({ ...x, d: dist(me, x) })).filter((x) => x.d <= (k.lampR || 3.4)).sort((a, b) => a.d - b.d)[0];
-    if (l && !l.lit) return { kind: 'lamp', text: 'Light the lamp' };
+    if (l && !l.lit && !sneak) return { kind: 'wire', i: lamps.indexOf(lamps.find((x) => x.x === l.x && x.y === l.y)), text: "Fix the lamp's wires", press: true };
     if (l && l.lit && sneak) return { kind: 'blow', text: 'Blow out the lamp', danger: true };
     const t = tasks.find((x) => !x.done && x.errand && x.k === 'spot' && dist(me, x) <= (k.errand || 2.8));
     if (t) return { errand: true, text: `${t.e} ${t.text}…` };
@@ -561,12 +568,81 @@
       box.className = 'nb-prompt show errand'; act.classList.add('hidden');
     } else if (pr) {
       const strikeNow = pr.kind === 'strike';
-      box.innerHTML = pr.hint ? `${/^\p{Extended_Pictographic}/u.test(pr.text) ? '' : '🌑 '}${esc(pr.text)}` : strikeNow ? `<span class="kbd">F</span> ${esc(pr.text.replace(/^Press F to /, ''))}`
+ box.innerHTML = pr.press ? `<span class="kbd">E</span> ${esc(pr.text)}` : pr.hint ? `${/^\p{Extended_Pictographic}/u.test(pr.text) ? '' : '🌑 '}${esc(pr.text)}` : strikeNow ? `<span class="kbd">F</span> ${esc(pr.text.replace(/^Press F to /, ''))}`
         : `<span class="kbd">E</span> Hold to ${esc(pr.text)}${prog ? `<span class="bar"><i style="width:${Math.round(prog * 100)}%"></i></span>` : ''}`;
       box.className = `nb-prompt show ${pr.danger ? 'danger' : ''} ${pr.hint ? 'hint' : ''}`;
       act.classList.toggle('hidden', !!pr.hint); act.classList.toggle('danger', !!pr.danger);
-      act.textContent = strikeNow ? '🌑 Strike!' : pr.danger ? '🌑 Hold' : '✋ Hold';
+      act.textContent = strikeNow ? '🌑 Strike!' : pr.press ? '🔧 Fix' : pr.danger ? '🌑 Hold' : '✋ Hold';
     } else { box.className = 'nb-prompt'; act.classList.add('hidden'); }
+  }
+
+  // ---------- the wire minigame (fixing a street lamp) ----------
+  let wireGame = null;
+  const WIRES = [['#FF5A6E', 'red'], ['#4C9BFF', 'blue'], ['#FFD24A', 'yellow'], ['#B57BFF', 'purple']];
+  function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+  function openWire(i) {
+    if (wireGame || i < 0 || !frame || !frame.me) return;
+    flushPos(true);
+    api.send({ t: 'wire', i, step: 'open' });
+    wireGame = { i, left: shuffled(WIRES.map((_, k) => k)), right: shuffled(WIRES.map((_, k) => k)), links: {}, sel: null, drag: null, at: performance.now(), done: false };
+    keys.clear(); touchDir = null;
+    renderWire();
+  }
+  function closeWire(send) {
+    if (!wireGame) return;
+    if (send && !wireGame.done) api.send({ t: 'wire', i: wireGame.i, step: 'close' });
+    wireGame = null;
+    const el = $('#wire-game'); el.className = 'wire-game hidden'; el.innerHTML = '';
+  }
+  function renderWire() {
+    const el = $('#wire-game'), w = wireGame; if (!el || !w) return;
+    const Y = (k) => 30 + k * 52;
+    const lines = Object.entries(w.links).map(([a, b]) => `<path d="M 44 ${Y(w.left.indexOf(+a))} C 120 ${Y(w.left.indexOf(+a))}, 160 ${Y(w.right.indexOf(+b))}, 236 ${Y(w.right.indexOf(+b))}" stroke="${WIRES[a][0]}" stroke-width="9" fill="none" stroke-linecap="round"/>`).join('');
+    const drag = w.drag ? `<path d="M 44 ${Y(w.left.indexOf(w.drag.c))} L ${w.drag.x} ${w.drag.y}" stroke="${WIRES[w.drag.c][0]}" stroke-width="9" fill="none" stroke-linecap="round" opacity=".85"/>` : '';
+    const node = (side, c, k) => `<g class="wn" data-side="${side}" data-c="${c}"><rect x="${side === 'l' ? 8 : 236}" y="${Y(k) - 15}" width="36" height="30" rx="7" fill="#2B2233"/>
+      <rect x="${side === 'l' ? 14 : 242}" y="${Y(k) - 9}" width="24" height="18" rx="4" fill="${WIRES[c][0]}" ${w.sel === c && side === 'l' ? 'stroke="#fff" stroke-width="3"' : ''}/></g>`;
+    const all = Object.keys(w.links).length === WIRES.length;
+    el.className = 'wire-game';
+    el.innerHTML = `<div class="wg-card"><div class="wg-head"><span>🔧 Fix the lamp</span><button class="wg-x" data-wx aria-label="Close">✕</button></div>
+      <p class="wg-tip">${all ? '💡 Connected!' : 'Connect each wire to the same color. Drag, or tap a wire then its match.'}</p>
+      <svg viewBox="0 0 280 230" class="wg-svg">${lines}${drag}${w.left.map((c, k) => node('l', c, k)).join('')}${w.right.map((c, k) => node('r', c, k)).join('')}</svg>
+      <p class="wg-warn">You can't move while fixing. Walking away drops the wires.</p></div>`;
+  }
+  function wirePoint(e) {
+    const svg = $('#wire-game .wg-svg'); if (!svg) return null;
+    const r = svg.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * 280, y: ((e.clientY - r.top) / r.height) * 230 };
+  }
+  function wireConnect(c, target) {
+    const w = wireGame; if (!w || w.links[c] !== undefined) return;
+    if (target === c) {
+      w.links[c] = c; sfx();
+      if (Object.keys(w.links).length === WIRES.length) {
+        w.done = true; renderWire();
+        const wait = Math.max(0, 1300 - (performance.now() - w.at)); // the server checks it took a moment
+        setTimeout(() => { if (wireGame === w) { api.send({ t: 'wire', i: w.i, step: 'done' }); setTimeout(() => { if (wireGame === w) closeWire(false); }, 450); } }, wait);
+        return;
+      }
+    } else { const el = $('#wire-game .wg-card'); if (el) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); } }
+    renderWire();
+  }
+  function sfx() { try { api.sound && api.sound('pop'); } catch (e) { /* no audio */ } }
+  function mountWire() {
+    const el = $('#wire-game');
+    el.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('[data-wx]')) { closeWire(true); return; }
+      const n = e.target.closest('.wn'); const w = wireGame; if (!w || w.done) return;
+      e.preventDefault();
+      if (n && n.dataset.side === 'l') { const c = +n.dataset.c; if (w.links[c] !== undefined) return; w.sel = c; w.drag = { c, ...wirePoint(e) }; renderWire(); }
+      else if (n && n.dataset.side === 'r' && w.sel !== null) { const c = w.sel; w.sel = null; w.drag = null; wireConnect(c, +n.dataset.c); }
+    });
+    el.addEventListener('pointermove', (e) => { const w = wireGame; if (!w || !w.drag) return; Object.assign(w.drag, wirePoint(e)); renderWire(); });
+    el.addEventListener('pointerup', (e) => {
+      const w = wireGame; if (!w || !w.drag) return;
+      const hit = document.elementFromPoint(e.clientX, e.clientY), n = hit && hit.closest && hit.closest('.wn');
+      const c = w.drag.c; w.drag = null;
+      if (n && n.dataset.side === 'r') { w.sel = null; wireConnect(c, +n.dataset.c); } else renderWire(); // let go elsewhere: keep it selected for tap-tap
+    });
   }
 
   // ---------- task list + confirmation banners ----------
@@ -585,7 +661,7 @@
     el.classList.toggle('open', open);
     const bells = frame && frame.bells !== undefined ? frame.bells : (G() && G().bellsLeft);
     el.innerHTML = `<div class="tk-head">📝 Tonight <b>${done}/${real.length}</b>${bells !== undefined ? `<span class="tk-bell" title="Bell rings left this game">🔔 ${bells}</span>` : ''}<span class="tk-tog">${open ? '▲' : '▼'}</span></div>`
-      + (open ? `<ul>${tasks.map(taskLi).join('')}</ul><div class="tk-foot">Errands: stand on the glowing ✨ spot. Finish them all for a brighter lantern.</div>`
+      + (open ? `<ul>${tasks.map(taskLi).join('')}</ul>${tasks.some((t) => t.errand) ? '<div class="tk-foot">Errands: stand on the glowing ✨ spot. Finish them all for a brighter lantern.</div>' : ''}`
         : next ? `<div class="tk-next">${next.e} ${esc(next.text)}</div>` : '<div class="tk-next">✨ All done! Keep your eyes open.</div>');
   }
   let bannerQ = [], bannerTimer = 0;

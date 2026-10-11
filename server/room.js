@@ -164,7 +164,7 @@ class Room {
     }
     if (!g || g.phase === 'over') return;
     switch (m.t) {
-      case 'move': case 'pos': case 'lantern': case 'hold': case 'strike': return Night.input(this, p.id, m);
+      case 'move': case 'pos': case 'lantern': case 'hold': case 'strike': case 'wire': return Night.input(this, p.id, m);
       case 'post': return this.post(p, m);
       case 'react': return this.react(p, m);
       case 'yarn': return this.setYarn(p, m);
@@ -219,12 +219,12 @@ class Room {
     }
     const order = shuffle(this.players.map((p) => p.id));
     const g = this.game = {
-      n, phase: 'night', day: 1, settling: n !== 7, endsAt: 0, roles: {}, alive: new Set(order), houses: order,
+      n, phase: 'night', day: 1, settling: false, endsAt: 0, roles: {}, alive: new Set(order), houses: order,
       log: [], priv: {}, notes: {}, claims: [], board: [], boardSeq: 1, yarn: {},
       actions: {}, meddles: {}, owlPending: [], lastProtect: {}, lastLight: {}, lastMeddle: {},
       turtles: new Set(), ready: new Set(), noms: {}, nominees: [], votes: {}, defenseIdx: 0, history: [], deaths: [],
       chat: { day: [], den: [], wisp: [] }, ai: {}, soloWins: new Set(), winner: null, winnerIds: new Set(),
-      settleLeft: [4, 8, 12, 13, 14].includes(n) ? 2 : n === 7 ? 0 : 1, scenes: [], tracks: [], trackLog: {}, outs: [], lampOuts: [],
+      settleLeft: 0, scenes: [], tracks: [], trackLog: {}, outs: [], lampOuts: [],
       world: Night.buildWorld(order), places: Night.LANDMARKS.map((l) => l.id), claimSeq: 1, eventSeq: 1, events: [], bigGame: n >= 12,
     };
     this.players.forEach((p, i) => { g.roles[p.id] = roles[i]; g.priv[p.id] = []; g.notes[p.id] = []; });
@@ -552,9 +552,18 @@ class Room {
   setReady(p) {
     const g = this.game;
     if (g.phase !== 'day' || !g.alive.has(p.id)) return;
+    if (g.ready.has(p.id)) return;
     g.ready.add(p.id);
     this.changed();
-    if (g.ready.size >= Math.ceil((g.alive.size * 2) / 3)) this.shorten(10 * Math.min(1, ENV_MULT));
+    // a majority is ready: skip the rest of the timer and go straight to voting
+    if (g.ready.size > g.alive.size / 2) { this.log('🙋 Most of the village is ready. Time to vote!'); this.shorten(1.5 * Math.min(1, ENV_MULT)); return; }
+    // a real player pressed Ready: AI critters who've had their say follow along soon
+    if (!p.isAI && ENV_MULT >= 1) {
+      for (const q of this.players) {
+        if (!q.isAI || !g.alive.has(q.id) || g.ready.has(q.id) || Math.random() > 0.65) continue;
+        setTimeout(() => { if (this.game === g && g.phase === 'day') this.setReady(q); }, 2000 + Math.random() * 5000);
+      }
+    }
   }
   nominate(p, m) {
     const g = this.game;
@@ -618,7 +627,7 @@ class Room {
       myAction: g.actions[pid] || null,
       world: g.world, nightDur: g.nightDur, scenes: g.scenes, tracks: g.phase === 'night' ? [] : g.tracks, outs: g.outs,
       nightConst: { light: Night.LIGHT, keen: Night.LIGHT_KEEN, dark: Night.DARK_SIGHT, lamp: Night.LAMP_LIGHT, porch: Night.PORCH_LIGHT, strike: Night.STRIKE_RANGE, house: Night.HOUSE_RANGE, lampR: Night.LAMP_RANGE, speed: Night.SPEED, hold: Night.HOLD_TIME, errand: Night.ERRAND_RANGE },
-      bellsLeft: g.bellsLeft === undefined ? (g.n >= 8 ? 3 : 2) : g.bellsLeft,
+      bellsLeft: g.bellsLeft === undefined ? (g.n >= 11 ? 3 : 2) : g.bellsLeft,
       nightTasks: g.phase === 'night' && g.night && g.night.tasks ? g.night.tasks[pid] || null : null,
       attempted: isSneakTeam(role) && g.night ? !!g.night.attempted : undefined,
       iReady: g.ready.has(pid), lastProtect: g.lastProtect[pid] || null, lastLight: g.lastLight[pid] || null,

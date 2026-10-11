@@ -59,7 +59,7 @@ function buildWorld(houses) {
     return { id, x: p.x, y: p.y, door: { x: p.x + Math.cos(toC) * 5.5, y: p.y + Math.sin(toC) * 5.5 }, r: 4 };
   });
   const lamps = [];
-  const LN = n >= 12 ? 8 : 6;
+  const LN = n >= 10 ? 8 : 6;
   for (let i = 0; i < LN; i++) {
     const a = -Math.PI / 2 + ((i + 0.5) * 2 * Math.PI) / LN;
     lamps.push({ x: 50 + 27 * Math.cos(a), y: 50 + 25 * Math.sin(a) });
@@ -116,7 +116,7 @@ function begin(room) {
     tasks: {}, tkVer: {}, tkSent: {}, ev: {}, fix: {},
     tomb: null, found: new Set(), foundAt: {}, bell: null, endNow: false, heard: {},
   };
-  if (g.bellsLeft === undefined) g.bellsLeft = g.n >= 8 ? 3 : 2;
+  if (g.bellsLeft === undefined) g.bellsLeft = g.n >= 11 ? 3 : 2;
   // Wisps (eliminated critters) float around as ghosts. Only other Wisps can see them.
   g.night.ghosts = {};
   for (const h of world.homes) if (!g.alive.has(h.id)) g.night.ghosts[h.id] = { x: h.door.x, y: h.door.y, budget: SPEED };
@@ -163,7 +163,7 @@ function makeTasks(room, id) {
     cands.push({ k: 'spot', text: text.replace('NAME', room.name(h.id)), e, x: h.door.x, y: h.door.y }); }
   { const i = Math.floor(Math.random() * w.lamps.length), l = w.lamps[i];
     cands.push({ k: 'lamp', i, text: `Make sure the lamp near ${zoneOf(w, l, (x) => room.name(x)).replace(/^the /, 'the ')} is lit`, e: '💡', x: l.x, y: l.y }); }
-  for (const c of shuffle(cands).slice(0, 3)) list.push({ ...c, done: false, errand: true });
+  if (!sneak) for (const c of shuffle(cands).slice(0, 3)) list.push({ ...c, done: false, errand: true }); // Sneaks get no errands
   list.forEach((t, i) => { t.n = i; if (t.x !== undefined) { t.x = +t.x.toFixed(1); t.y = +t.y.toFixed(1); } });
   return list;
 }
@@ -225,8 +225,8 @@ function holdTarget(room, id) {
   for (let i = 0; i < n.lamps.length; i++) {
     const l = n.lamps[i];
     if (dist(p, l) > LAMP_RANGE) continue;
-    if (!l.lit) return { kind: 'lamp', target: i };
-    if (sneak) return { kind: 'blow', target: i };
+    // dark lamps are fixed with the wire minigame (non-Sneaks only); Sneaks can blow lit ones out
+    if (l.lit && sneak) return { kind: 'blow', target: i };
   }
   return null;
 }
@@ -250,6 +250,24 @@ function strike(room, id, target) {
   if (!canStrike(room, id, target)) return false;
   completeHold(room, id, { kind: 'strike', target });
   return true;
+}
+
+// ---------- street lamps: fixing the wires ----------
+const WIRE_MIN = 1.2; // seconds: nobody connects four wires faster than this
+function lightLamp(room, id, i) {
+  const n = room.game.night, l = n.lamps[i];
+  if (!l || l.lit) return false;
+  l.lit = true; n.lampLog.push({ id, lamp: i, t: n.t, on: true });
+  if (n.ev[id]) n.ev[id].push({ e: '💡', text: 'You fixed the wires. The lamp is lit!' });
+  return true;
+}
+function wire(room, id, m) {
+  const g = room.game, n = g.night, p = n.pos[id], i = Number(m.i);
+  const l = n.lamps[i];
+  if (m.step === 'close') { p.wiring = null; return; }
+  if (!l || isSneakTeam(g.roles[id]) || l.lit || dist(p, l) > LAMP_RANGE + 0.8) { p.wiring = null; return; }
+  if (m.step === 'open') { p.wiring = { i, at: n.t }; p.hold = null; return; }
+  if (m.step === 'done' && p.wiring && p.wiring.i === i && n.t - p.wiring.at >= WIRE_MIN) { p.wiring = null; lightLamp(room, id, i); }
 }
 
 const GHOST_SPEED = SPEED * 1.25;
@@ -289,6 +307,7 @@ function input(room, id, m) {
     return;
   }
   if (m.t === 'strike') { strike(room, id, String(m.target || '')); return; }
+  if (m.t === 'wire') { wire(room, id, m); return; }
   if (m.t === 'move') {
     let dx = Number(m.dx) || 0, dy = Number(m.dy) || 0;
     const len = Math.hypot(dx, dy);
@@ -311,7 +330,7 @@ function completeHold(room, id, h) {
   const g = room.game, n = g.night, p = n.pos[id], role = g.roles[id];
   const ev = n.ev[id] || (n.ev[id] = []), who = (x) => room.name(x);
   if (h.kind === 'bell') { ringBell(room, id); return; }
-  if (h.kind === 'lamp') { n.lamps[h.target].lit = true; n.lampLog.push({ id, lamp: h.target, t: n.t, on: true }); ev.push({ e: '💡', text: 'You lit the lamp!' }); return; }
+  if (h.kind === 'lamp') { lightLamp(room, id, h.target); return; }
   if (h.kind === 'blow') { n.lamps[h.target].lit = false; n.lampLog.push({ id, lamp: h.target, t: n.t, on: false }); n.outs.push({ x: n.lamps[h.target].x, y: n.lamps[h.target].y, t: n.t, lamp: true }); ev.push({ e: '🌑', text: 'You blew out the lamp.' }); return; }
   if (h.kind === 'house') {
     if (role === 'trickster') {
@@ -399,6 +418,7 @@ function tick(room, dt) {
       if (!near) p.errT = 0;
     }
     if (p.hold && moved > 0.05) p.hold = null; // moving cancels a hold
+    if (p.wiring && moved > 0.3) p.wiring = null; // ...and walking away from a lamp drops the wires
     if (p.hold) {
       // re-validate the target every tick
       const now = holdTarget(room, id);
@@ -535,6 +555,6 @@ function summarize(room, meddled = new Set()) {
 
 module.exports = {
   TICK, FRAME_EVERY, LIGHT, LIGHT_KEEN, ERRAND_RANGE, ERRAND_TIME, DARK_SIGHT, LAMP_LIGHT, PORCH_LIGHT, STRIKE_RANGE, HOLD_TIME, HOUSE_RANGE, LAMP_RANGE, SPEED,
-  HEAR_RANGE, BELL_RANGE, BELL_COOLDOWN, bellSpot, BELL_NEAR, ringBell, strike, canStrike, touchDist,
+  WIRE_MIN, lightLamp, HEAR_RANGE, BELL_RANGE, BELL_COOLDOWN, bellSpot, BELL_NEAR, ringBell, strike, canStrike, touchDist,
   begin, tick, input, frameFor, summarize, holdTarget, recognizes, inStaticLight, zoneOf, blocked, dist, buildWorld, LANDMARKS,
 };

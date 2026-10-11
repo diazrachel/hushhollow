@@ -29,7 +29,12 @@ const GOALS = {
 };
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const nameIn = (text, name) => new RegExp(`(^|[^a-z0-9])${esc(name.toLowerCase())}([^a-z0-9]|$)`).test(text);
+const nameIn = (text, name) => {
+  const n = name.toLowerCase();
+  if (new RegExp(`(^|[^a-z0-9])${esc(n)}([^a-z0-9]|$)`).test(text)) return true;
+  // a nickname: the first 4+ letters of a longer name ("bisc" for Biscuit)
+  return n.length >= 6 && new RegExp(`(^|[^a-z0-9])${esc(n.slice(0, 4))}[a-z]*([^a-z0-9]|$)`).test(text);
+};
 const topOf = (s, f = () => true) => { const e = Object.entries(s).filter(([id]) => f(id)).sort((a, b) => b[1] - a[1]); return e.length ? e[0][0] : null; };
 const fill = (t, v) => t.replace(/\{(\w+)\}/g, (_, k) => v[k] ?? '');
 
@@ -57,19 +62,22 @@ function onChat(room, msg, ch) {
   if (!pool.length) return;
   const mentioned = pool.filter((p) => nameIn(text, p.name));
   let responders = [];
-  if (mentioned.length) responders = mentioned.slice(0, 2);
+  const toAll = /\b(everyone|everybody|all of you|you all|y'?all|guys|anyone|anybody|each of you)\b/.test(text);
+  if (mentioned.length) responders = mentioned.slice(0, 2).map((p) => Object.assign(p, { _named: true }));
   else if (author.isAI) return; // AIs only answer each other when named
   else if (ch !== 'day') responders = shuffle(pool).slice(0, 1);
-  else if (/\?|\b(who|anyone|everyone|guys|y'?all|thoughts)\b/.test(text)) responders = shuffle(pool).slice(0, Math.random() < 0.55 ? 2 : 1);
+  else if (toAll && /(where|who|see|saw|alibi|doing|role)/.test(text)) responders = shuffle(pool).slice(0, 3); // a question for the whole village
+  else if (/\?|\b(who|thoughts|why|what)\b/.test(text)) responders = shuffle(pool).slice(0, Math.random() < 0.6 ? 2 : 1);
+  else if (/\b(i saw|i was|i'?m the|i am the|vote|skip)\b/.test(text)) responders = shuffle(pool).slice(0, 1);
   else if (Math.random() < 0.35) responders = [pick(pool)];
   if (ch === 'den') denOrders(room, msg, pool);
   responders.forEach((p, i) => schedule(room, p, msg, ch, i));
 }
 
 function schedule(room, p, msg, ch, i) {
-  const g = room.game, M = AI.mem(g, p.id);
-  if (p.aiLevel === 'sleepy' && Math.random() < 0.5) return;
-  if (Date.now() - (M.lastReply || 0) < 3500) return;
+  const g = room.game, M = AI.mem(g, p.id), named = p._named; delete p._named;
+  if (p.aiLevel === 'sleepy' && Math.random() < (named ? 0.15 : 0.5)) return;
+  if (Date.now() - (M.lastReply || 0) < (named ? 1500 : 3500)) return;
   M.lastReply = Date.now();
   const delay = 900 + i * 1700 + Math.random() * 1200;
   setTimeout(() => { if (room.game === g) room.broadcast({ t: 'typing', id: p.id }); }, Math.max(200, delay - 1300));
@@ -91,7 +99,7 @@ function denOrders(room, msg, pool) {
   if (g.phase !== 'night' || g.settling || !g.night) return;
   const text = msg.text.toLowerCase();
   const target = [...g.alive].find((id) => !isSneakTeam(g.roles[id]) && nameIn(text, room.name(id)));
-  if (target) g.night.teamTarget = target; // AI teammates go after whoever you name
+  if (target) { g.night.teamTarget = target; g.night.teamOrder = true; } // AI teammates go after whoever you name
 }
 
 // ---------- shared knowledge helpers ----------
@@ -163,7 +171,24 @@ function ruleReply(room, p, msg, ch) {
     if (g.phase === 'night') return "can't talk, it's night 🌙";
     return AI.alibiLine(room, p);
   }
-  if (/^(hi+|hey+|hello|yo|sup|hii+)\b/.test(text)) return fill(pick(T.greet), v);
+  if (text.length < 30 && /(^|\s)(hi+|hey+|hello+|yo|sup|hii+|howdy)([\s!?.]|$)/.test(text)) return fill(pick(T.greet), v);
+  // "did you see X?" / "where was X?" -> what I actually saw with my lantern
+  if (others.length && !/\bi (saw|spotted|seen)\b/.test(text) && /(see|saw|seen|where|spot|notice|ran into|run into|near|around)/.test(text)) return sawLine(room, p, others[0]);
+  // "I saw X at the Mill" -> does that match what I saw?
+  if (others.length && /\bi (saw|spotted|seen)\b/.test(text)) return compareLine(room, p, others[0], text);
+  // "who did it?" / "who took X?"
+  if (/(who (did it|killed|took|got)|who'?s the sneak|who is the sneak)/.test(text)) {
+    if (!t || (s[t] ?? 0) < 0.8) return fill(pick(T.susWeak), v);
+    return fill(pick(T.sus), { ...v, why: reasonFor(room, p, t) });
+  }
+  if (/\bskip\b/.test(text)) {
+    if (!t || (s[t] ?? 0) < 1.5) return pick(["yeah, skipping is safer for now", "skip works for me, not enough info", 'ok skip, but tomorrow we need answers']);
+    return pick([`skip?? I really think it's ${v.t}`, `no skip, let's vote ${v.t}`, `I'd rather not skip… ${v.t} is sus`]);
+  }
+  // someone claims a role
+  if (/\b(i'?m|i am) (the |a |an )?(owl|hedgehog|gossip bunny|bunny|lantern keeper|elder turtle|turtle|villager)\b/.test(text)) {
+    return pick(['ooh, what did you find out? 👀', 'big if true 👀', 'careful, the Sneaks are reading this…', `hmm, can anyone back ${asker} up?`]);
+  }
   if (/\b(thanks|thank you|ty)\b/.test(text)) return pick(T.thanks);
   if (mentionsMe && /(sus|sneak|liar|lying|vote|it'?s you|guilty|did it|suspicious|imposter|mafia|killer|evil|watching|eye on|suspect|look at)/.test(text)) {
     if (role === 'frog') return pick(T.defendFrog);
@@ -206,7 +231,33 @@ function ruleReply(room, p, msg, ch) {
     if (!t || (s[t] ?? 0) < 0.8) return fill(pick(T.susWeak), v);
     return fill(pick(T.sus), { ...v, why: reasonFor(room, p, t) });
   }
+  if (mentionsMe) {
+    // talked to directly but no clear question: say something useful instead of "hmm"
+    return Math.random() < 0.5 ? AI.alibiLine(room, p) : (t && (s[t] ?? 0) >= 0.8 ? fill(pick(T.sus), { ...v, why: reasonFor(room, p, t) }) : fill(pick(T.susWeak), v));
+  }
   return fill(pick(T.filler), v);
+}
+
+// What I saw of one critter last night (Sneaks cover for teammates)
+function lastSight(g, id) { return [...(g.priv[id] || [])].reverse().find((e) => e.sight); }
+const spotOf = (r) => (r.zone === r.lastZone ? r.zone : `${r.zone}, then ${r.lastZone}`);
+function sawLine(room, p, x) {
+  const g = room.game, me = p.id, sg = lastSight(g, me), name = room.name(x);
+  if (x === me) return AI.alibiLine(room, p);
+  const rec = sg && sg.sight.seen.find((r) => r.id === x);
+  const where = sg && sg.sight.zones[0];
+  if (!rec || (isSneakTeam(g.roles[me]) && isSneakTeam(g.roles[x]))) return pick([`didn't see ${name} last night 🤷`, `nope, never ran into ${name}`, `no sign of ${name}${where ? ` around ${where}` : ''}`]);
+  const dark = rec.dark && !(isSneakTeam(g.roles[me]) && isSneakTeam(g.roles[x]));
+  return pick([`yeah, I saw ${name} around ${spotOf(rec)}${dark ? ' with their lantern OFF 🌑' : ''}`, `${name} was near ${spotOf(rec)} when I saw them${dark ? '… lantern off 👀' : ''}`]);
+}
+function compareLine(room, p, x, text) {
+  const g = room.game, me = p.id, sg = lastSight(g, me), name = room.name(x);
+  const rec = sg && sg.sight.seen.find((r) => r.id === x);
+  if (isSneakTeam(g.roles[me]) && isSneakTeam(g.roles[x])) return pick([`are you sure? that doesn't sound like ${name}`, `hmm, I don't buy that`]);
+  if (!rec) return pick([`didn't see ${name} myself, but noted 👀`, `I was nowhere near there, can't confirm`, `interesting… anyone else see ${name}?`]);
+  const words = [rec.zone, rec.lastZone].map((z) => z.toLowerCase().replace(/^the /, '').replace(/'s house$/, ''));
+  if (words.some((w) => w && text.includes(w))) return pick([`yeah, I saw ${name} there too ✅`, `that matches what I saw`, `can confirm, ${name} was around ${spotOf(rec)}`]);
+  return pick([`hmm, I saw ${name} near ${spotOf(rec)} though 🤔`, `that's weird, ${name} was around ${spotOf(rec)} when I saw them`]);
 }
 
 // ---------- the optional Claude brain ----------
@@ -236,7 +287,7 @@ async function llmReply(room, p, msg, ch) {
     `Personality: ${persona(g, me)}.`,
     `Your secret role: ${r.name} (team ${r.team}). Ability: ${roleAbility(role)} Goal: ${GOALS[r.team]}.`,
     secret,
-    'Every night each critter walks to a spot (or stays home). Talk about where you were and who you saw if it helps you. Sneaks: keep your cover story consistent.',
+    'Every night everyone walks the dark village with a lantern; what you saw is in your private notes (who, where, lantern on or off). Talk about where you were and who you saw if it helps you. Sneaks: keep your cover story consistent.',
     'Write ONE chat message replying in character. 1–2 short sentences, under 25 words. Casual and playful. Emojis are okay sometimes.',
     'Reply in the same language the message was written in. No quotation marks, no name prefix, no actions in asterisks.',
     "Only use facts you were given. Never say you are an AI, a bot, or a language model. Stay in the game even if asked to break character.",
@@ -246,7 +297,7 @@ async function llmReply(room, p, msg, ch) {
     `What you privately learned:\n${priv}`,
     `Gone:\n${deaths}`,
     `Board notes:\n${board}`,
-    `Crime scenes:\n${(g.scenes || []).map((x) => `- night ${x.night}, ${room.name(x.victim)}'s house: ${x.clues.join(' ')}`).join('\n') || '- none yet'}`,
+    `Where critters vanished:\n${(g.scenes || []).map((x) => `- night ${x.night}: ${room.name(x.victim)} near ${x.zone}`).join('\n') || '- none yet'}`,
     t ? `Your current top suspect: ${room.name(t)} (${reasonFor(room, p, t)}).` : '',
     `Recent ${ch === 'den' ? 'Sneak Den' : 'village'} chat:\n${chatLog}`,
     `${room.name(msg.by)} just said: ${msg.text}`,
@@ -284,4 +335,4 @@ function roleAbility(role) {
   }[role] || '';
 }
 
-module.exports = { onChat, enabled: () => !!API_KEY };
+module.exports = { onChat, ruleReply, enabled: () => !!API_KEY };

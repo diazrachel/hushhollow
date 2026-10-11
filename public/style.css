@@ -603,3 +603,16 @@ li.done .tk-box { background: #7FD06A; color: #fff; }
 .conn-btn { border: 2.5px solid var(--ink); border-radius: 999px; background: #FFF8EC; color: var(--ink); font-weight: 800; padding: .15rem .7rem; cursor: pointer; font-family: inherit; }
 .rejoin-card { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; background: #FFE9A8; }
 .nb-tasks .tk-bell { font-size: .78rem; font-family: var(--body, inherit); background: #FFE9A8; border: 2px solid #2B2233; border-radius: 999px; padding: 0 .4rem; }
+
+/* the lamp wire minigame */
+.wire-game { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(7,6,24,.45); z-index: 5; touch-action: none; }
+.wg-card { width: min(340px, 92%); background: #3A3466; border: 3px solid #2B2233; border-radius: 18px; box-shadow: 0 5px 0 #2B2233; padding: .7rem .8rem .6rem; color: #F1EDFF; }
+.wg-card.shake { animation: wgshake .3s; }
+@keyframes wgshake { 25% { transform: translateX(-6px); } 50% { transform: translateX(6px); } 75% { transform: translateX(-3px); } }
+.wg-head { display: flex; align-items: center; justify-content: space-between; font-family: var(--display); font-size: 1.05rem; }
+.wg-x { border: 2px solid #F1EDFF; background: transparent; color: #F1EDFF; border-radius: 999px; width: 2rem; height: 2rem; cursor: pointer; font-weight: 800; }
+.wg-tip, .wg-warn { margin: .3rem 0; font-size: .78rem; font-weight: 700; opacity: .9; }
+.wg-warn { opacity: .65; }
+.wg-svg { width: 100%; height: auto; display: block; background: #241F45; border-radius: 12px; cursor: pointer; }
+.wn { cursor: grab; }
+@media (max-width: 560px) { .wg-warn { display: none; } .wg-card { padding: .5rem .6rem; } .wg-tip { font-size: .72rem; } }

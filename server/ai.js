@@ -62,6 +62,9 @@ function suspicion(room, p) {
   const s = {};
   others.forEach((id) => { s[id] = Math.random() * (p.aiLevel === 'sleepy' ? 10 : 1.2); });
   if (p.aiLevel === 'sleepy') return s;
+  // each AI has its own gut feeling about every critter (kept all game), so they don't all think alike
+  const M0 = mem(g, me), gut = M0.gut || (M0.gut = {});
+  for (const id of others) { if (!(id in gut)) gut[id] = (Math.random() * 2 - 1) * (p.aiLevel === 'cunning' ? 2.4 : 3.2); s[id] += gut[id]; }
   const add = (id, v) => { if (id in s) s[id] += v; };
 
   // My own hints
@@ -81,7 +84,7 @@ function suspicion(room, p) {
   for (const id of others) if (g.turtles.has(id)) s[id] -= 30;
 
   // Cards on the Board
-  const roleClaims = {};
+  const roleClaims = {}, accN = {};
   for (const c of g.claims) {
     if (c.kind === 'role') (roleClaims[c.role] = roleClaims[c.role] || new Set()).add(c.by);
     const w = cleared.has(c.by) ? 1.5 : 1;
@@ -90,10 +93,11 @@ function suspicion(room, p) {
       else c.targets.forEach((x) => add(x, (c.targets.length === 1 ? 4 : 1.5) * w));
     }
     if (c.kind === 'saw') add(c.target, (diedAtNight(g, c.at, c.day) ? 4 : 0.5) * w);
-    if (c.kind === 'accuse') add(c.target, 0.8 * w);
+    if (c.kind === 'accuse') { const q = room.get(c.by); accN[c.target] = (accN[c.target] || 0) + w * (q && q.isAI ? 0.35 : 1); } // AIs don't just echo each other
     // Someone lying about me (I know I'm village)
     if (!sneak && c.by !== me && ((c.kind === 'saw' && c.target === me) || (c.kind === 'accuse' && c.target === me))) add(c.by, c.kind === 'saw' ? 5 : 1);
   }
+  for (const [id, k] of Object.entries(accN)) add(id, 1.1 * Math.sqrt(k)); // a crowd isn't proof
   for (const [r, set] of Object.entries(roleClaims)) {
     const limit = r === 'villager' ? 99 : r === 'owl' || r === 'hedgehog' ? 2 : 1;
     if (set.size > limit) set.forEach((id) => add(id, cleared.has(id) ? 0 : 4));
@@ -247,6 +251,10 @@ function pin(room, me, sticker, text, tags) { room.act(me, { t: 'post', sticker,
 // What this critter says about its night walk. Village critters tell the truth;
 // a Sneak who did the deed lies if the crime scene points at where they really were.
 function alibiLine(room, p) {
+  const name = room.name(p.id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return alibiRaw(room, p).replace(new RegExp(`${name}'s house`, 'g'), 'my house');
+}
+function alibiRaw(room, p) {
   const g = room.game, me = p.id, sneak = isSneakTeam(g.roles[me]), night = g.day;
   const sg = (g.priv[me] || []).filter((e) => e.sight && e.sight.night === night).pop();
   const sc = (g.scenes || []).find((x) => x.night === night);
@@ -346,7 +354,16 @@ function dayTalk(room, p) {
       }
     }
   }
-  const t = top(s);
+  let t = top(s);
+  // if the village is already piling onto someone, an independent thinker points somewhere else
+  const pile = g.claims.filter((c) => c.kind === 'accuse' && c.target === t && c.day === g.day && c.by !== me).length;
+  const second = top(s, (id) => id !== t);
+  if (t && pile >= 2 && second && s[second] >= s[t] * 0.55 && Math.random() < 0.6 && !M.posted.has(`day${g.day}`)) {
+    M.posted.add(`day${g.day}`);
+    room.act(me, { t: 'chat', text: pick([`everyone's on ${room.name(t)}, but I'm not sold. what about ${room.name(second)}? 🤔`, `slow down, ${room.name(t)} might be a scapegoat. ${room.name(second)} has been weird.`, `idk about ${room.name(t)}… I keep coming back to ${room.name(second)}`]) });
+    speak(room, me, { kind: 'accuse', target: second });
+    t = second;
+  }
   if (t && s[t] >= (sneak ? 0.8 : 3) && !M.posted.has(`day${g.day}`) && (!sneak || Math.random() < 0.5)) {
     M.posted.add(`day${g.day}`);
     if (Math.random() < 0.45) {

@@ -5,8 +5,8 @@ A free, cozy social deduction game you play in the browser. A few critters in th
 - 4 to 14 players, roles auto-balanced for every lobby size
 - Quick Play with strangers (by language), or private burrows with a 4-letter code and share link
 - Add AI critters (Sleepy, Clever, Cunning) to fill any lobby
-- **Lantern Night**: every night is real-time. Walk the dark village with your lantern (WASD / arrows, or drag on a phone), light street lamps, and use abilities by holding E at someone's door. Sneaks must snuff their lantern, creep up on someone outside the lamplight, and touch them (press F) to strike. A strike makes a squeak that nearby critters hear, and anyone nearby might see them
-- A random task list every night: your role's job plus 3 errands around the village (feed the ducks, return a book…). Finish them all for a brighter lantern. Sneaks get fake errands as cover
+- **Lantern Night**: every night is real-time. Walk the dark village with your lantern (WASD / arrows, or drag on a phone), fix street lamps with a wire-connecting minigame (every lamp is dark at nightfall, and Sneaks can't strike in lamplight), and use abilities by holding E at someone's door. Sneaks must snuff their lantern, creep up on someone outside the lamplight, and touch them (press F) to strike. A strike makes a squeak that nearby critters hear, and anyone nearby might see them
+- A random task list every night: your role's job plus 3 errands around the village (feed the ducks, return a book…). Finish them all for a brighter lantern. Sneaks get no errands, just their goal
 - Smooth on slow connections: your own critter moves instantly in your browser (the server double-checks every step), other critters glide between updates, and abilities show a big confirmation the moment they work
 - Tombstones mark where someone was taken. Find one and ring the village bell (2 rings per game, 3 in big villages) to end the night and see who was closest
 - Rejoin anytime: lost wifi, closed the tab, or pressed Leave by mistake? An AI keeps your seat until you come back
@@ -86,7 +86,7 @@ The server owns every secret. Clients send intents ("I'm moving left", "I'm hold
 | Gossip Bunny | Village | Watch a house: learn who visited, but not why |
 | Elder Turtle | Village | Reveal once during the day for a double vote |
 | Lantern Keeper | Village | Hang a lantern on a porch; next night nobody can be taken in its light |
-| Sneak | Sneaks | Snuff your lantern, sneak up on someone outside the lamplight, and hold E (one strike per night for the team) |
+| Sneak | Sneaks | Snuff your lantern, sneak up on someone outside the lamplight, and press F when you're right next to them (one strike per night for the team, from Night 1). No errands |
 | Trickster | Sneaks | Also meddles with one critter a night, slightly scrambling their info |
 | Shadow Mole | Sneaks | With lantern off: no footprints, nearly invisible, and unseen by the Bunny |
 | Pond Frog | Solo | Wins if voted into the Pond |
@@ -102,7 +102,7 @@ Setups per player count live in `server/roles.js` (`sneakCount`, `owlCount`, and
 
 To shorten nights for testing: `NIGHT_MULT=0.4 npm start`. (`SPEED_MULT` below 1 runs nights as an instant simulation, for balance scripts only.)
 
-Controls at night: **WASD / arrows** to walk, **hold E or Space** to act (light a lamp, use your ability at a door, ring the bell), **F** to strike (Sneaks only, when touching someone), **Q** to snuff or relight your lantern, **T** to open or close tonight's task list. On a phone, press and drag on the map to walk and use the on-screen buttons.
+Controls at night: **WASD / arrows** to walk, **hold E or Space** to act (use your ability at a door, ring the bell; press E at a dark lamp to fix its wires), **F** to strike (Sneaks only, when touching someone), **Q** to snuff or relight your lantern, **T** to open or close tonight's task list. On a phone, press and drag on the map to walk and use the on-screen buttons.
 
 ## License
 

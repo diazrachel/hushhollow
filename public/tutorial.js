@@ -51,7 +51,7 @@
         ready: () => st.flipped,
       },
       { // 2
-        say: () => !st.checked ? "Night falls, and it's dark! In a real game you walk the village with your lantern (WASD or drag) and <b>hold E</b> at a door to use your ability. The first night is a settling-in night, so nobody vanishes. Tap <b>Pip's</b> house to watch Pip."
+        say: () => !st.checked ? "Night falls, and it's dark! In a real game you walk the village with your lantern (WASD or drag) and <b>hold E</b> at a door to use your ability. Sneaks can strike from the very first night, so stay in the light! Tap <b>Pip's</b> house to watch Pip."
           : !st.noted ? "The Owl never gets a straight answer. The game adds two random critters to the one you watched, and tells you one true thing about the group: either <b>at least one is a Sneak</b>, or the fuzzier <b>at least one is NOT a Sneak</b>. Write it down! If you're ever spirited away, the whole village reads your notepad."
           : 'Perfect. One hint is fuzzy. Several hints together tell a story.',
         scene: () => mini(st.checked ? [] : ['pip'], { pond: 'Night 1', picked: st.checked ? 'pip' : null })

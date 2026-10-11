@@ -365,7 +365,7 @@
       if (g.phase === 'night') sound('night'); else if (g.phase === 'dawn') sound('chime'); else if (g.phase === 'vote') sound('pop');
       const alive = g.alive.includes(S.me);
       if (!alive && ui.chatCh !== 'wisp') ui.chatCh = 'wisp';
-      if (g.phase === 'night' && alive) hint(`walk${g.day}`, 'walk with WASD / arrows (or press and drag). Hold E by a lamp to light it. Notice who you meet!');
+      if (g.phase === 'night' && alive) hint(`walk${g.day}`, 'walk with WASD / arrows (or press and drag). Press E at a dark street lamp to fix its wires. Notice who you meet!');
       if (g.phase === 'day') hint(`day${g.day}`, 'talk it out in Chat or pin a note on the Board. You decide how much to reveal!');
       if (g.phase === 'vote') hint('vote', "tap a house to vote, or Skip if you're unsure.");
     }
@@ -629,7 +629,7 @@
           steps.push(who ? `✓ Done: ${r.verb.split(' ')[0].toLowerCase()} ${nm(who)}` : `Walk to someone's door and <b>hold E</b> to ${r.verb.split(' ')[0].toLowerCase()} them.`);
           if (g.myRole === 'hedgehog' && g.lastProtect) steps.push(`Can't protect ${nm(g.lastProtect)} twice in a row.`);
         }
-        if (!onTeam || g.settling) steps.push('Light street lamps (<b>hold E</b> by a lamp). Sneaks can\'t strike in lamplight.', 'Notice who you meet, and where. Lanterns going dark are suspicious 👀');
+        if (!onTeam || g.settling) steps.push('Fix dark street lamps (press <b>E</b> by one and connect the wires). Sneaks can\'t strike in lamplight.', 'Notice who you meet, and where. Lanterns going dark are suspicious 👀');
         if (g.myRole === 'trickster' && !g.settling) steps.push(g.myMeddle ? `✓ Meddled with ${nm(g.myMeddle)}` : '🎭 Hold E at a door to meddle with that critter\'s night.');
         text = `<ol>${steps.map((x) => `<li>${x}</li>`).join('')}</ol>`;
         const tl = window.HHNight && window.HHNight.tasks ? window.HHNight.tasks() : [];
@@ -639,7 +639,7 @@
           if (main) { done = main.done; who = null; }
           text = `<ul class="task-list">${tl.map((t) => t.k === 'info' ? `<li class="info"><span class="tk-e">${t.e}</span><span>${esc2(t.text)}</span></li>`
             : `<li class="${t.done ? 'done' : ''} ${t.errand ? '' : 'main'}"><span class="tk-box">${t.done ? '✓' : ''}</span><span class="tk-e">${t.e}</span><span>${esc2(t.text)}</span></li>`).join('')}</ul>
-            <p class="small muted" style="margin:.5rem 0 0;font-weight:700">Errands: stand on the glowing spot (✨ on your map). Finish all of them and your lantern burns brighter. Light dark street lamps with <b>E</b>: Sneaks can't strike in lamplight. Watch who goes dark 👀</p>`;
+            ${!tl.some((t) => t.errand) ? '' : `<p class="small muted" style="margin:.5rem 0 0;font-weight:700">Errands: stand on the glowing spot (✨ on your map). Finish all of them and your lantern burns brighter. Every street lamp starts dark: press <b>E</b> by one and connect its wires to light it. Sneaks can't strike in lamplight. Watch who goes dark 👀</p>`}`;
         }
       }
     } else if (g.phase === 'dawn') { label = 'Morning'; text = 'Check the morning report and what you learned last night.'; }
@@ -651,7 +651,7 @@
           : `<ol><li>Read the Board and Chat</li><li>Question people, push on stories</li>${g.bigGame ? '<li>Tap a critter → Nominate</li>' : ''}<li>Press Ready to vote</li></ol>`;
         if (g.bigGame) { who = g.noms[S.me]; done = !!who; }
         actions += `<button class="btn small ${g.iReady ? 'on' : 'honey'}" data-a="ready" ${g.iReady ? 'disabled' : ''}>${g.iReady ? '✓ Ready' : '🙋 Ready to vote'}</button>
-          <span class="small muted" style="font-weight:800">${g.readyCount}/${g.alive.length} ready</span>`;
+          <span class="small muted" style="font-weight:800">${g.readyCount}/${g.alive.length} ready · vote starts at ${Math.floor(g.alive.length / 2) + 1}</span>`;
       }
     } else if (g.phase === 'defense') { label = 'Defense'; text = `${nm(g.nominees[g.defenseIdx])} is defending. Nominees:`; actions = `<div class="team-list">${g.nominees.map((id) => `<span class="tag">${nm(id)}</span>`).join('')}</div>`; }
     else if (g.phase === 'vote') {
@@ -889,7 +889,7 @@
           <p style="text-align:center">${mine ? "That's you! You're a Wisp now. You can read every chat, even the Sneaks' Den." : 'Their role stays secret, but they left their notepad behind:'}</p>
           ${mine ? '' : `<div class="behind">${notesHTML(d && d.notes)}</div>`}`;
       }).join('');
-    } else body = `<div class="splash-txt" style="margin:.6rem 0">${e.night <= 1 || (e.saved === false && !died.length && g.day <= 2 && e.night === 1) ? '🌼 A quiet night in the Hollow.' : e.saved ? '🦔 Everyone is safe! Someone was protected.' : '🌼 Everyone woke up safe.'}</div>`;
+    } else body = `<div class="splash-txt" style="margin:.6rem 0">${e.saved ? '🦔 Everyone is safe! Someone was protected.' : '🌼 Everyone woke up safe.'}</div>`;
     const outs = (e.outs || []).length ? `<li>🌑 Lanterns went dark near ${e.outs.map((o) => `${esc(o.zone)} (${o.when})`).join(', ')}</li>` : '';
     const lampOuts = (e.lampOuts || []).length ? `<li>💨 A street lamp was blown out near ${e.lampOuts.map((o) => esc(o.zone)).join(', ')}</li>` : '';
     const b = e.bell;
